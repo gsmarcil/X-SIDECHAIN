@@ -29,11 +29,14 @@ At least two agents are required.
     "scheme": "Bearer"
   },
   "headers": {"X-Optional-Header": "value"},
-  "max_output_tokens": 4096
+  "max_output_tokens": 4096,
+  "allow_insecure_http": false
 }
 ```
 
-Set `auth.type` to `none` for a trusted local service. For official OAuth Device
+Set `auth.type` to `none` for a trusted local service. `base_url` must be `https://`
+unless it points at a loopback address; `allow_insecure_http: true` is the explicit
+opt-out for a remote cleartext endpoint. For official OAuth Device
 Flow, provide `device_authorization_url`, `token_url`, `client_id`, and optional
 `scopes`, then run `x-sidechain auth login PROVIDER_ID --config x-sidechain.json`.
 

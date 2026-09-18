@@ -80,6 +80,22 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "agent id"):
             self._load(raw)
 
+    def test_cleartext_http_to_a_remote_provider_is_rejected(self) -> None:
+        raw = valid_config()
+        raw["providers"]["custom"]["base_url"] = "http://models.example/v1"
+        with self.assertRaisesRegex(ValueError, "cleartext http"):
+            self._load(raw)
+
+    def test_cleartext_http_is_allowed_for_loopback_and_by_opt_in(self) -> None:
+        raw = valid_config()
+        raw["providers"]["custom"]["base_url"] = "http://127.0.0.1:11434/v1"
+        self.assertEqual(self._load(raw).providers["custom"].base_url, "http://127.0.0.1:11434/v1")
+
+        raw = valid_config()
+        raw["providers"]["custom"]["base_url"] = "http://models.example/v1"
+        raw["providers"]["custom"]["allow_insecure_http"] = True
+        self.assertTrue(self._load(raw).providers["custom"].allow_insecure_http)
+
     def test_legacy_synthesizer_key_is_migrated(self) -> None:
         raw = valid_config()
         raw["synthesizer"] = raw.pop("chair")

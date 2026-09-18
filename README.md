@@ -20,7 +20,10 @@ workflow, authentication, and provider contracts are stable.
 - A chair draft, parallel peer review, and evidence-gated final result.
 - User corrections while the team is working. A correction increments the task
   revision and restarts the affected chaired cycle instead of mixing two states.
-- A hard model-call budget and tamper-evident JSONL audit trail.
+- A hard model-call budget, aggregated token usage, and a tamper-evident JSONL audit
+  trail written with owner-only permissions.
+- Transient provider failures (429, 5xx, connection resets) retried with backoff
+  without consuming model-call budget.
 - Responses-compatible, Chat Completions-compatible, and Anthropic
   Messages-compatible endpoints.
 - API keys, trusted local no-auth endpoints, and official OAuth Device Flow where a
@@ -65,6 +68,7 @@ need `/finish` to complete.
 
 The command prints the final result plus two paths:
 
+- `model_calls` and `usage_totals`: what the session actually spent.
 - `audit_path`: hash-chained session record.
 - `workspace_root`: private analyses, public briefs, clarifications, draft, reviews,
   and final result, grouped by revision and agent.
@@ -97,6 +101,6 @@ See [Architecture](docs/ARCHITECTURE.md),
 
 - Add sandboxed tools scoped to each agent workspace.
 - Add native streaming and mid-turn steering where providers support it.
-- Add retries, context compaction, and richer artifact manifests.
+- Add context compaction and richer artifact manifests.
 - Build the Linux UI on the stable chaired-workflow event stream.
 - Add signed exports, `.deb`, and AppImage artifacts.

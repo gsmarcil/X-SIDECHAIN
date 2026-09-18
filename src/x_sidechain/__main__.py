@@ -94,30 +94,41 @@ def _interactive_run(orchestrator: SidechainOrchestrator, task: str) -> Discussi
             "Use /finish to close input and let the chaired workflow finish.",
             flush=True,
         )
+        accepting = True
         while not future.done():
+            if not accepting:
+                # Input is closed; wait for the chaired cycle rather than reading stdin.
+                time.sleep(0.2)
+                continue
             readable, _, _ = select.select([sys.stdin], [], [], 0.2)
             if not readable:
                 continue
             line = sys.stdin.readline()
             if not line:
-                while not future.done():
-                    time.sleep(0.1)
-                break
+                accepting = False
+                continue
             message = line.strip()
             if not message:
                 continue
             if message == "/finish":
+                accepting = False
                 try:
                     orchestrator.request_finish()
-                except RuntimeError:
-                    if not future.done():
-                        raise
+                except RuntimeError as exc:
+                    print(f"[x-sidechain] {exc}", flush=True)
+                else:
+                    print(
+                        "[x-sidechain] Input closed. Finishing the current chaired cycle.",
+                        flush=True,
+                    )
                 continue
             try:
                 orchestrator.inject_user_message(message)
-            except RuntimeError:
-                if not future.done():
-                    raise
+            except (RuntimeError, ValueError) as exc:
+                # Losing a finished session over a late keystroke would waste the
+                # whole model-call budget, so report and keep the result.
+                print(f"[x-sidechain] input ignored: {exc}", flush=True)
+                accepting = isinstance(exc, ValueError)
         return future.result()
 
 
@@ -166,12 +177,17 @@ def main() -> int:
                         "session_id": result.session_id,
                         "audit_path": result.audit_path,
                         "workspace_root": result.workspace_root,
+                        "model_calls": result.model_calls,
+                        "usage_totals": result.usage_totals,
                     },
                     indent=2,
                 )
             )
             print("\n" + result.synthesis.text)
             return 0
+    except KeyboardInterrupt:
+        print("\nERROR: interrupted; in-flight provider calls may still be billed")
+        return 130
     except (RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}")
         return 2

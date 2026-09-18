@@ -15,7 +15,10 @@
 
 ## Local workspace
 
-Workspace directories use `0700`; files use `0600`. Agent IDs are validated before
+Workspace directories use `0700`; files use `0600`. The session directory and the
+audit directory (`~/.local/share/x-sidechain/sessions`) are also `0700`, and audit
+logs are created `0600`: they contain the task text and every model reply, so they
+must not inherit a world-readable umask. Agent IDs are validated before
 being used as path components, and relative workspace writes reject `..` and absolute
 paths. This is not yet an OS sandbox: agents currently have no tools and cannot access
 the filesystem directly. Future tools must be confined to the owning agent directory.
@@ -23,6 +26,10 @@ the filesystem directly. Future tools must be confined to the owning agent direc
 ## Secrets and account authentication
 
 - API keys come from environment variables named in configuration.
+- A provider `base_url` (or OAuth endpoint) on cleartext `http://` is rejected unless
+  the host is loopback, because the API key and the task would cross the network in
+  the clear. Set `"allow_insecure_http": true` on that provider to accept the risk
+  deliberately, for example for a trusted host on a private link.
 - Keys and OAuth tokens are excluded from configuration output, workspaces, and audit
   payloads.
 - OAuth is allowed only through provider-published Device Authorization Grant values.
@@ -38,9 +45,13 @@ Do not combine providers that are not all authorized to receive the task materia
 ## Audit and cost boundaries
 
 - Audit chaining detects later modification but does not prove authorship or provide
-  an external timestamp.
+  an external timestamp. Reopening an existing log continues its chain; a log that
+  already fails verification is never extended.
 - Superseded revision work remains in local workspaces and audit logs.
 - Model output is untrusted text and is never executed.
 - `max_model_calls` prevents the application from starting calls beyond the session
-  budget; calls already accepted by a provider may still be billed.
+  budget; calls already accepted by a provider may still be billed. Transport retries
+  (429 and 5xx) do not consume budget but may be billed by the provider.
+- Aggregated provider-reported token usage is written to `session.completed` and
+  printed with the run summary.
 - HTTPS uses Python's default certificate validation.

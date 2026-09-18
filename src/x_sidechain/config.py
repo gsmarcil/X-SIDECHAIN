@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +36,7 @@ class ProviderConfig:
     auth: AuthConfig
     headers: dict[str, str] = field(default_factory=dict)
     max_output_tokens: int = 4096
+    allow_insecure_http: bool = False
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,7 @@ def _required_string(raw: dict[str, Any], key: str, context: str) -> str:
     return value.strip()
 
 
-def _auth_config(raw: Any, context: str) -> AuthConfig:
+def _auth_config(raw: Any, context: str, allow_insecure_http: bool = False) -> AuthConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"{context}.auth must be an object")
     auth_type = _required_string(raw, "type", f"{context}.auth")
@@ -95,15 +97,36 @@ def _auth_config(raw: Any, context: str) -> AuthConfig:
         ]
         if missing:
             raise ValueError(f"{context}.auth is missing OAuth fields: {', '.join(missing)}")
-        _validate_url(str(config.device_authorization_url), f"{context}.auth.device_authorization_url")
-        _validate_url(str(config.token_url), f"{context}.auth.token_url")
+        _validate_url(
+            str(config.device_authorization_url),
+            f"{context}.auth.device_authorization_url",
+            allow_insecure_http,
+        )
+        _validate_url(str(config.token_url), f"{context}.auth.token_url", allow_insecure_http)
     return config
 
 
-def _validate_url(value: str, context: str) -> str:
+def _is_loopback(host: str | None) -> bool:
+    if not host:
+        return False
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _validate_url(value: str, context: str, allow_insecure_http: bool = False) -> str:
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError(f"{context} must be an absolute HTTP(S) URL")
+    if parsed.scheme == "http" and not allow_insecure_http and not _is_loopback(parsed.hostname):
+        raise ValueError(
+            f"{context} uses cleartext http to a remote host, which would expose the "
+            "API key and the task text on the network; use https, or set "
+            "\"allow_insecure_http\": true on this provider to accept the risk"
+        )
     return value.rstrip("/")
 
 
@@ -142,13 +165,21 @@ def load_config(path: str | Path) -> RunConfig:
         max_tokens = max_tokens_raw
         if max_tokens < 1:
             raise ValueError(f"{context}.max_output_tokens must be positive")
+        allow_insecure = item.get("allow_insecure_http", False)
+        if not isinstance(allow_insecure, bool):
+            raise ValueError(f"{context}.allow_insecure_http must be a boolean")
         providers[provider_id] = ProviderConfig(
             id=provider_id,
             protocol=protocol,
-            base_url=_validate_url(_required_string(item, "base_url", context), f"{context}.base_url"),
-            auth=_auth_config(item.get("auth", {"type": "none"}), context),
+            base_url=_validate_url(
+                _required_string(item, "base_url", context),
+                f"{context}.base_url",
+                allow_insecure,
+            ),
+            auth=_auth_config(item.get("auth", {"type": "none"}), context, allow_insecure),
             headers=dict(headers),
             max_output_tokens=max_tokens,
+            allow_insecure_http=allow_insecure,
         )
 
     agents_raw = raw.get("agents")
