@@ -50,6 +50,15 @@ Do not combine providers that are not all authorized to receive the task materia
 - Superseded revision work remains in local workspaces and audit logs.
 - An abstaining agent contributes no evidence. The chair is instructed never to read
   an absence as agreement, and every abstention is recorded with its cause.
+- A provider's own error text never reaches another agent. Room events, prompts and
+  the audit carry only a cause this project wrote itself, such as
+  `provider returned HTTP 503`; the response body can echo request headers or another
+  tenant's data, and the briefs of agents from different vendors share one room. The
+  full text is written to the failing agent's private workspace as
+  `provider-errors.log` (`0600`) for the local operator only.
+- Abstentions name the step that is missing (`no brief`, `no clarification`,
+  `no review`), so an agent that filed a brief and then missed one step is never
+  reported to the chair as absent.
 - Model output is untrusted text and is never executed.
 - `max_model_calls` prevents the application from starting calls beyond the session
   budget; calls already accepted by a provider may still be billed. Transport retries

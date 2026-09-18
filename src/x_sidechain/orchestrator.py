@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from x_sidechain.audit import AuditLog
+from x_sidechain.http import ProviderHTTPError
 from x_sidechain.models import AgentSpec, DiscussionEvent, DiscussionResult, ModelReply
 from x_sidechain.prompts import (
     chair_draft_prompt,
@@ -96,16 +97,42 @@ def _questions_object(text: str) -> dict | None:
     return objects[0] if objects else None
 
 
-class RevisionChanged(RuntimeError):
+class SessionError(RuntimeError):
+    """An orchestrator-raised error. Its message is ours, so it is safe to show."""
+
+
+class RevisionChanged(SessionError):
     pass
 
 
-class BudgetExhausted(RuntimeError):
+class BudgetExhausted(SessionError):
     """The model-call budget is spent. Never degraded to an agent abstention."""
 
 
-class DeadlineReached(RuntimeError):
+class DeadlineReached(SessionError):
     """The session wall-clock deadline passed. No further cycle may start."""
+
+
+def public_failure_reason(exc: BaseException) -> str:
+    """The cause other agents and the audit may see.
+
+    Provider text can echo request headers or another tenant's data, and the
+    briefs of agents from different vendors share one room, so nothing but a
+    message this project wrote itself is ever published. Full detail goes to the
+    failing agent's own private workspace instead.
+    """
+    if isinstance(exc, (ProviderHTTPError, SessionError)):
+        return str(exc)
+    return type(exc).__name__
+
+
+def failure_detail(exc: BaseException) -> str:
+    """Operator-only text, written to the agent workspace and never to a prompt."""
+    parts = [f"{type(exc).__name__}: {exc}"]
+    detail = getattr(exc, "detail", "")
+    if detail:
+        parts.append(f"\nprovider response:\n{detail}")
+    return "".join(parts)
 
 
 def truncate_brief(text: str, limit: int) -> str:
@@ -232,6 +259,9 @@ class SidechainOrchestrator:
                     "session deadline passed; the running cycle will finish with the "
                     "updates it already has"
                 )
+            # Every in-flight call is already counted, and bumping the revision
+            # below stops the superseded cycle from reserving more, so this
+            # remainder is what the restarted cycle will really have.
             remaining = self.max_model_calls - self._model_calls
             if remaining < self.cycle_cost:
                 raise RuntimeError(
@@ -269,19 +299,15 @@ class SidechainOrchestrator:
     def _ensure_revision(self, revision: int, phase: str) -> None:
         with self._condition:
             if revision != self._revision:
-                assert self._audit is not None
-                self._audit.append(
-                    "cycle.superseded",
-                    {
-                        "phase": phase,
-                        "old_revision": revision,
-                        "new_revision": self._revision,
-                    },
-                )
                 raise RevisionChanged(phase)
 
-    def _reserve_model_call(self) -> None:
+    def _reserve_model_call(self, revision: int) -> None:
         with self._condition:
+            if revision != self._revision:
+                # A correction was accepted, so this cycle is already superseded.
+                # Stopping here is what makes the budget check in
+                # inject_user_message exact: no call is reserved after it ran.
+                raise RevisionChanged("reserve")
             if self._model_calls >= self.max_model_calls:
                 raise BudgetExhausted(
                     f"model-call budget exhausted ({self.max_model_calls}); "
@@ -295,8 +321,8 @@ class SidechainOrchestrator:
                 if isinstance(value, int) and not isinstance(value, bool):
                     self._usage[key] = self._usage.get(key, 0) + value
 
-    def _generate(self, runtime: AgentRuntime, prompt: str) -> ModelReply:
-        self._reserve_model_call()
+    def _generate(self, runtime: AgentRuntime, prompt: str, revision: int) -> ModelReply:
+        self._reserve_model_call(revision)
         reply = runtime.provider.generate(system_prompt(runtime.spec.role), prompt)
         self._record_usage(reply)
         return reply
@@ -305,7 +331,7 @@ class SidechainOrchestrator:
         self,
         work: Callable[[AgentRuntime], object],
         agents=None,
-    ) -> tuple[dict[str, object], dict[str, str]]:
+    ) -> tuple[dict[str, object], dict[str, BaseException]]:
         """Run work per agent, returning what completed and why the rest did not.
 
         One provider failing is that agent abstaining, not the end of a session the
@@ -316,7 +342,7 @@ class SidechainOrchestrator:
         if not selected:
             return {}, {}
         results: dict[str, object] = {}
-        failures: dict[str, str] = {}
+        failures: dict[str, BaseException] = {}
         control: BaseException | None = None
         with ThreadPoolExecutor(max_workers=len(selected), thread_name_prefix="xsidechain-team") as pool:
             futures = {runtime.spec.id: pool.submit(work, runtime) for runtime in selected}
@@ -327,7 +353,7 @@ class SidechainOrchestrator:
                 except (BudgetExhausted, DeadlineReached, RevisionChanged) as exc:
                     control = control or exc
                 except Exception as exc:  # noqa: BLE001 - any provider failure is an abstention
-                    failures[agent_id] = f"{type(exc).__name__}: {exc}"
+                    failures[agent_id] = exc
         if control is not None:
             raise control
         return results, failures
@@ -336,24 +362,44 @@ class SidechainOrchestrator:
         self,
         revision: int,
         phase: str,
-        failures: dict[str, str],
+        label: str,
+        failures: dict[str, BaseException],
+        abstentions: dict[str, str],
+        workspace: SessionWorkspace,
         audit: AuditLog,
     ) -> None:
+        """Record who did not contribute, without leaking what the provider said."""
         if not failures:
             return
         self.progress(
             f"Revision {revision}: {len(failures)} agent(s) abstained during {phase}"
         )
+        public: dict[str, str] = {}
+        for agent_id, exc in failures.items():
+            reason = public_failure_reason(exc)
+            public[agent_id] = reason
+            note = f"{label} ({reason})"
+            abstentions[agent_id] = (
+                f"{abstentions[agent_id]}; {note}" if agent_id in abstentions else note
+            )
+            # Operator-only: the provider's own text never reaches a prompt, the
+            # room, or the audit, only the failing agent's private workspace.
+            workspace.write(
+                revision,
+                agent_id,
+                "provider-errors.log",
+                f"[{phase}] {failure_detail(exc)}",
+            )
         audit.append(
             "agent.abstained",
-            {"revision": revision, "phase": phase, "failures": dict(failures)},
+            {"revision": revision, "phase": phase, "failures": public},
         )
         self._publish_batch(
             revision,
             "agent.abstention",
             [
                 (agent_id, f"ABSTAINED during {phase}: {reason}", None)
-                for agent_id, reason in failures.items()
+                for agent_id, reason in public.items()
             ],
         )
 
@@ -365,15 +411,6 @@ class SidechainOrchestrator:
     ) -> list[DiscussionEvent]:
         with self._condition:
             if revision != self._revision:
-                assert self._audit is not None
-                self._audit.append(
-                    "cycle.superseded",
-                    {
-                        "phase": kind,
-                        "old_revision": revision,
-                        "new_revision": self._revision,
-                    },
-                )
                 raise RevisionChanged(kind)
             based_on = self._events[-1].sequence
             published = [
@@ -439,6 +476,7 @@ class SidechainOrchestrator:
             analysis = self._generate(
                 runtime,
                 private_analysis_prompt(task, steering, runtime.spec.id),
+                revision,
             )
             workspace.write(revision, runtime.spec.id, "analysis.md", analysis.text)
             summary = self._generate(
@@ -446,6 +484,7 @@ class SidechainOrchestrator:
                 public_summary_prompt(
                     task, steering, analysis.text, self.max_public_brief_chars
                 ),
+                revision,
             )
             if len(summary.text) > self.max_public_brief_chars:
                 # The prompt asks for a bounded brief; the limit is enforced here so a
@@ -480,17 +519,22 @@ class SidechainOrchestrator:
         briefs, brief_failures = self._settle(build_brief)
         self._ensure_revision(revision, "private_analysis")
         typed_briefs = {agent_id: value for agent_id, value in briefs.items() if isinstance(value, AgentBrief)}
-        abstentions: dict[str, str] = dict(brief_failures)
-        self._publish_abstentions(revision, "private analysis", brief_failures, audit)
+        abstentions: dict[str, str] = {}
+        self._publish_abstentions(
+            revision, "private analysis", "no brief", brief_failures, abstentions, workspace, audit
+        )
         if self.chair_id not in typed_briefs:
-            raise RuntimeError(
+            chair_failure = brief_failures.get(self.chair_id)
+            raise SessionError(
                 f"chair {self.chair_id} produced no brief "
-                f"({brief_failures.get(self.chair_id, 'unknown error')}); a chaired "
-                "workflow cannot continue without its chair"
+                f"({public_failure_reason(chair_failure) if chair_failure else 'unknown error'}); "
+                "a chaired workflow cannot continue without its chair"
             )
         if len(typed_briefs) < self.min_agent_quorum:
-            reasons = "; ".join(f"{name}: {why}" for name, why in brief_failures.items())
-            raise RuntimeError(
+            reasons = "; ".join(
+                f"{name}: {public_failure_reason(why)}" for name, why in brief_failures.items()
+            )
+            raise SessionError(
                 f"only {len(typed_briefs)} of {len(self.agents)} agents produced a brief, "
                 f"below min_agent_quorum={self.min_agent_quorum} ({reasons})"
             )
@@ -514,6 +558,7 @@ class SidechainOrchestrator:
                 summaries,
                 self.max_clarification_questions,
             ),
+            revision,
         )
         workspace.write(revision, self.chair_id, "chair/questions.json", question_reply.text)
         self._ensure_revision(revision, "chair_questions")
@@ -553,14 +598,17 @@ class SidechainOrchestrator:
                         brief.summary.text,
                         question_by_agent[agent_id],
                     ),
+                    revision,
                 )
                 workspace.write(revision, agent_id, "clarification.md", reply.text)
                 return reply
 
             answers, answer_failures = self._settle(answer_question, selected)
             self._ensure_revision(revision, "clarifications")
-            abstentions.update(answer_failures)
-            self._publish_abstentions(revision, "clarification", answer_failures, audit)
+            self._publish_abstentions(
+                revision, "clarification", "no clarification", answer_failures,
+                abstentions, workspace, audit,
+            )
             clarification_replies = {
                 agent_id: reply for agent_id, reply in answers.items() if isinstance(reply, ModelReply)
             }
@@ -580,6 +628,7 @@ class SidechainOrchestrator:
         draft = self._generate(
             chair,
             chair_draft_prompt(task, steering, summaries, clarifications, abstentions),
+            revision,
         )
         workspace.write(revision, self.chair_id, "chair/draft.md", draft.text)
         self._ensure_revision(revision, "chair_draft")
@@ -603,14 +652,16 @@ class SidechainOrchestrator:
                     brief.summary.text,
                     draft.text,
                 ),
+                revision,
             )
             workspace.write(revision, runtime.spec.id, "review.md", reply.text)
             return reply
 
         review_results, review_failures = self._settle(review, reviewers)
         self._ensure_revision(revision, "peer_review")
-        abstentions.update(review_failures)
-        self._publish_abstentions(revision, "peer review", review_failures, audit)
+        self._publish_abstentions(
+            revision, "peer review", "no review", review_failures, abstentions, workspace, audit
+        )
         review_replies = {
             agent_id: reply for agent_id, reply in review_results.items() if isinstance(reply, ModelReply)
         }
@@ -630,6 +681,7 @@ class SidechainOrchestrator:
                 {agent_id: reply.text for agent_id, reply in review_replies.items()},
                 abstentions,
             ),
+            revision,
         )
         workspace.write(revision, self.chair_id, "chair/final.md", final.text)
         self._ensure_revision(revision, "final")
@@ -695,8 +747,16 @@ class SidechainOrchestrator:
                         workspace,
                         audit,
                     )
-                except RevisionChanged:
+                except RevisionChanged as superseded:
                     with self._condition:
+                        audit.append(
+                            "cycle.superseded",
+                            {
+                                "phase": superseded.args[0] if superseded.args else "unknown",
+                                "old_revision": revision,
+                                "new_revision": self._revision,
+                            },
+                        )
                         remaining = self.max_model_calls - self._model_calls
                     if remaining < self.cycle_cost:
                         audit.append(

@@ -23,7 +23,8 @@ workflow, authentication, and provider contracts are stable.
 <<<<<<< HEAD
 - A hard model-call budget and tamper-evident JSONL audit trail.
 - Quorum-based resilience: one failing provider abstains and is recorded instead of
-  ending a session the other agents already paid for.
+  ending a session the other agents already paid for. The provider's own error text
+  stays in that agent's private workspace and never reaches another vendor's model.
 - Bounded restarts, an optional session deadline, and an enforced public-brief size,
   so a long session still ends with a result.
 =======

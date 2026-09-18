@@ -1,7 +1,7 @@
 import unittest
 import unittest.mock
 
-from x_sidechain.http import ProviderHTTPError, post_json
+from x_sidechain.http import MAX_ERROR_BYTES, ProviderHTTPError, post_json
 
 
 class RetryingTransportTests(unittest.TestCase):
@@ -48,6 +48,57 @@ class RetryingTransportTests(unittest.TestCase):
         with unittest.mock.patch("x_sidechain.http._attempt", return_value="<html>gateway</html>"):
             with self.assertRaisesRegex(ProviderHTTPError, "non-JSON"):
                 post_json("https://example.invalid/v1/chat", {}, {}, 30, sleep=lambda _s: None)
+
+
+    def test_connection_reset_and_early_disconnect_are_retried(self) -> None:
+        import http.client
+
+        for error in (
+            ConnectionResetError("reset by peer"),
+            http.client.RemoteDisconnected("closed without response"),
+            http.client.IncompleteRead(b"partial"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                attempts = []
+
+                def fake_urlopen(*_args, _error=error, **_kwargs):
+                    attempts.append(1)
+                    raise _error
+
+                with unittest.mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                    with self.assertRaises(ProviderHTTPError) as caught:
+                        post_json(
+                            "https://example.invalid/v1/chat", {}, {}, 30, sleep=lambda _s: None
+                        )
+                # urlopen only wraps what it sees while connecting; these arrive raw
+                # from getresponse() and are exactly the transient cases to retry.
+                self.assertEqual(len(attempts), 3)
+                self.assertTrue(caught.exception.retryable)
+
+    def test_error_body_is_bounded_and_kept_out_of_the_message(self) -> None:
+        import urllib.error
+
+        class HugeError(urllib.error.HTTPError):
+            code = 500
+            headers = None
+
+            def __init__(self) -> None:
+                self.read_amount = None
+
+            def read(self, amt=None):
+                self.read_amount = amt
+                return b"secret-body " * 4096
+
+        error = HugeError()
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(ProviderHTTPError) as caught:
+                post_json("https://example.invalid/v1/chat", {}, {}, 30, sleep=lambda _s: None)
+
+        self.assertEqual(error.read_amount, MAX_ERROR_BYTES)
+        self.assertEqual(str(caught.exception), "provider returned HTTP 500")
+        self.assertNotIn("secret-body", str(caught.exception))
+        self.assertIn("secret-body", caught.exception.detail)
+        self.assertLessEqual(len(caught.exception.detail), MAX_ERROR_BYTES)
 
 
 if __name__ == "__main__":

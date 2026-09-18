@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import random
 import time
@@ -9,17 +10,30 @@ from typing import Any
 
 
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+MAX_ERROR_BYTES = 8192
 RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
 DEFAULT_ATTEMPTS = 3
 
 
 class ProviderHTTPError(RuntimeError):
-    """A provider call failed. `retryable` marks transient transport conditions."""
+    """A provider call failed.
 
-    def __init__(self, message: str, status: int | None = None, retryable: bool = False) -> None:
+    The message is safe to show to other agents: it never carries the provider's
+    response body, which can echo request headers or another tenant's data. The
+    body is kept in `detail` for the local operator only.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status: int | None = None,
+        retryable: bool = False,
+        detail: str = "",
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.retryable = retryable
+        self.detail = detail
 
 
 def _retry_after_seconds(headers: Any, fallback: float) -> float:
@@ -46,16 +60,25 @@ def _attempt(url: str, headers: dict[str, str], payload: dict[str, Any], timeout
         with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read(MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")[:2000]
+        # Bounded twice: ask for a capped read, then cut what came back. The cap
+        # exists precisely because the other side may not be well behaved.
+        body = exc.read(MAX_ERROR_BYTES)[:MAX_ERROR_BYTES].decode("utf-8", errors="replace")
         raise ProviderHTTPError(
-            f"provider returned HTTP {exc.code}: {body}",
+            f"provider returned HTTP {exc.code}",
             status=exc.code,
             retryable=exc.code in RETRYABLE_STATUS,
-            ) from exc
-    except urllib.error.URLError as exc:
-        raise ProviderHTTPError(f"provider connection failed: {exc.reason}", retryable=True) from exc
+            detail=body,
+        ) from exc
     except TimeoutError as exc:
-        raise ProviderHTTPError(f"provider request timed out after {timeout}s", retryable=True) from exc
+        raise ProviderHTTPError(
+            f"provider request timed out after {timeout}s", retryable=True
+        ) from exc
+    except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
+        # urlopen only wraps failures it sees while connecting. A connection reset
+        # or an early disconnect during getresponse() arrives raw, and those are
+        # exactly the transient cases worth retrying.
+        reason = getattr(exc, "reason", None) or type(exc).__name__
+        raise ProviderHTTPError(f"provider connection failed: {reason}", retryable=True) from exc
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ProviderHTTPError("provider response exceeded the 32 MiB safety limit")
     return raw.decode("utf-8", errors="replace")
