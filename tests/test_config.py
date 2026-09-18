@@ -80,6 +80,49 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "agent id"):
             self._load(raw)
 
+    def test_new_bounds_have_defaults(self) -> None:
+        config = self._load(valid_config())
+        self.assertEqual(config.min_agent_quorum, 2)
+        self.assertEqual(config.max_revisions, 8)
+        self.assertEqual(config.max_public_brief_chars, 1200)
+        self.assertIsNone(config.session_deadline_seconds)
+
+    def test_quorum_cannot_exceed_the_agent_count(self) -> None:
+        raw = valid_config()
+        raw["min_agent_quorum"] = 4
+        with self.assertRaisesRegex(ValueError, "min_agent_quorum must be between 2 and 3"):
+            self._load(raw)
+
+    def test_quorum_below_two_is_rejected(self) -> None:
+        raw = valid_config()
+        raw["min_agent_quorum"] = 1
+        with self.assertRaisesRegex(ValueError, "min_agent_quorum"):
+            self._load(raw)
+
+    def test_revision_and_brief_bounds_are_validated(self) -> None:
+        raw = valid_config()
+        raw["max_revisions"] = 101
+        with self.assertRaisesRegex(ValueError, "max_revisions"):
+            self._load(raw)
+
+        raw = valid_config()
+        raw["max_public_brief_chars"] = 100
+        with self.assertRaisesRegex(ValueError, "max_public_brief_chars"):
+            self._load(raw)
+
+    def test_deadline_shorter_than_one_call_is_rejected(self) -> None:
+        raw = valid_config()
+        raw["request_timeout_seconds"] = 600
+        raw["session_deadline_seconds"] = 300
+        with self.assertRaisesRegex(ValueError, "at least request_timeout_seconds"):
+            self._load(raw)
+
+    def test_deadline_is_accepted_when_it_fits_a_call(self) -> None:
+        raw = valid_config()
+        raw["request_timeout_seconds"] = 120
+        raw["session_deadline_seconds"] = 3600
+        self.assertEqual(self._load(raw).session_deadline_seconds, 3600)
+
     def test_legacy_synthesizer_key_is_migrated(self) -> None:
         raw = valid_config()
         raw["synthesizer"] = raw.pop("chair")

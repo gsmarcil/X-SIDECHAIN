@@ -45,6 +45,10 @@ class RunConfig:
     request_timeout_seconds: int = 600
     max_clarification_questions: int = 4
     max_model_calls: int | None = None
+    min_agent_quorum: int = 2
+    max_revisions: int = 8
+    session_deadline_seconds: int | None = None
+    max_public_brief_chars: int = 1200
 
 
 def _required_string(raw: dict[str, Any], key: str, context: str) -> str:
@@ -105,6 +109,21 @@ def _validate_url(value: str, context: str) -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError(f"{context} must be an absolute HTTP(S) URL")
     return value.rstrip("/")
+
+
+def _bounded_int(
+    raw: dict[str, Any],
+    key: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    value = raw.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{key} must be an integer")
+    if value < minimum or value > maximum:
+        raise ValueError(f"{key} must be between {minimum} and {maximum}")
+    return value
 
 
 def load_config(path: str | Path) -> RunConfig:
@@ -203,6 +222,20 @@ def load_config(path: str | Path) -> RunConfig:
             raise ValueError(
                 f"max_model_calls must be at least {minimum_calls} for this configuration"
             )
+    quorum = _bounded_int(raw, "min_agent_quorum", 2, 2, len(agents))
+    max_revisions = _bounded_int(raw, "max_revisions", 8, 0, 100)
+    brief_chars = _bounded_int(raw, "max_public_brief_chars", 1200, 200, 20000)
+    deadline_raw = raw.get("session_deadline_seconds")
+    if deadline_raw is not None:
+        if not isinstance(deadline_raw, int) or isinstance(deadline_raw, bool):
+            raise ValueError("session_deadline_seconds must be an integer")
+        if deadline_raw < timeout:
+            raise ValueError(
+                "session_deadline_seconds must be at least request_timeout_seconds; "
+                "a deadline shorter than one call can never be met"
+            )
+        if deadline_raw > 86_400:
+            raise ValueError("session_deadline_seconds must be at most 86400")
     return RunConfig(
         providers=providers,
         agents=tuple(agents),
@@ -210,4 +243,8 @@ def load_config(path: str | Path) -> RunConfig:
         request_timeout_seconds=timeout,
         max_clarification_questions=clarification_raw,
         max_model_calls=max_calls_raw,
+        min_agent_quorum=quorum,
+        max_revisions=max_revisions,
+        session_deadline_seconds=deadline_raw,
+        max_public_brief_chars=brief_chars,
     )

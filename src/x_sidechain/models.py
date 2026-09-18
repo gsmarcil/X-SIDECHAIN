@@ -49,3 +49,4 @@ class DiscussionResult:
     synthesis: ModelReply
     audit_path: str
     workspace_root: str
+    abstentions: dict[str, str] = field(default_factory=dict)

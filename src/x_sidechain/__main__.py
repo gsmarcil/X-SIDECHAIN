@@ -94,30 +94,41 @@ def _interactive_run(orchestrator: SidechainOrchestrator, task: str) -> Discussi
             "Use /finish to close input and let the chaired workflow finish.",
             flush=True,
         )
+        accepting = True
         while not future.done():
+            if not accepting:
+                # Input is closed; wait for the chaired cycle rather than reading stdin.
+                time.sleep(0.2)
+                continue
             readable, _, _ = select.select([sys.stdin], [], [], 0.2)
             if not readable:
                 continue
             line = sys.stdin.readline()
             if not line:
-                while not future.done():
-                    time.sleep(0.1)
-                break
+                accepting = False
+                continue
             message = line.strip()
             if not message:
                 continue
             if message == "/finish":
+                accepting = False
                 try:
                     orchestrator.request_finish()
-                except RuntimeError:
-                    if not future.done():
-                        raise
+                except RuntimeError as exc:
+                    print(f"[x-sidechain] {exc}", flush=True)
+                else:
+                    print(
+                        "[x-sidechain] Input closed. Finishing the current chaired cycle.",
+                        flush=True,
+                    )
                 continue
             try:
                 orchestrator.inject_user_message(message)
-            except RuntimeError:
-                if not future.done():
-                    raise
+            except (RuntimeError, ValueError) as exc:
+                # A refused correction (revision cap, deadline, remaining budget) must
+                # never discard a session the run already paid for.
+                print(f"[x-sidechain] correction refused: {exc}", flush=True)
+                accepting = isinstance(exc, ValueError)
         return future.result()
 
 
@@ -133,7 +144,8 @@ def main() -> int:
         if args.command == "validate-config":
             print(
                 f"PASS: {len(config.providers)} providers, {len(config.agents)} agents, "
-                f"chair={config.chair}"
+                f"chair={config.chair}, quorum={config.min_agent_quorum}, "
+                f"max_revisions={config.max_revisions}"
             )
             return 0
         if args.command == "providers":
@@ -151,6 +163,10 @@ def main() -> int:
                 chair_id=config.chair,
                 max_clarification_questions=config.max_clarification_questions,
                 max_model_calls=config.max_model_calls,
+                min_agent_quorum=config.min_agent_quorum,
+                max_revisions=config.max_revisions,
+                session_deadline_seconds=config.session_deadline_seconds,
+                max_public_brief_chars=config.max_public_brief_chars,
                 progress=lambda message: print(f"[x-sidechain] {message}", flush=True),
                 on_event=_show_event,
             )
@@ -166,6 +182,7 @@ def main() -> int:
                         "session_id": result.session_id,
                         "audit_path": result.audit_path,
                         "workspace_root": result.workspace_root,
+                        "abstentions": result.abstentions,
                     },
                     indent=2,
                 )

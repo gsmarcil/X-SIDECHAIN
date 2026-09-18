@@ -21,6 +21,10 @@ workflow, authentication, and provider contracts are stable.
 - User corrections while the team is working. A correction increments the task
   revision and restarts the affected chaired cycle instead of mixing two states.
 - A hard model-call budget and tamper-evident JSONL audit trail.
+- Quorum-based resilience: one failing provider abstains and is recorded instead of
+  ending a session the other agents already paid for.
+- Bounded restarts, an optional session deadline, and an enforced public-brief size,
+  so a long session still ends with a result.
 - Responses-compatible, Chat Completions-compatible, and Anthropic
   Messages-compatible endpoints.
 - API keys, trusted local no-auth endpoints, and official OAuth Device Flow where a
@@ -65,6 +69,7 @@ need `/finish` to complete.
 
 The command prints the final result plus two paths:
 
+- `abstentions`: any agent that did not report, and why.
 - `audit_path`: hash-chained session record.
 - `workspace_root`: private analyses, public briefs, clarifications, draft, reviews,
   and final result, grouped by revision and agent.
