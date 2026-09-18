@@ -1,7 +1,7 @@
 import unittest
 import unittest.mock
 
-from x_sidechain.http import MAX_ERROR_BYTES, ProviderHTTPError, post_json
+from x_sidechain.http import MAX_ERROR_BYTES, ProviderHTTPError, post_json, scrub
 
 
 class RetryingTransportTests(unittest.TestCase):
@@ -99,6 +99,50 @@ class RetryingTransportTests(unittest.TestCase):
         self.assertNotIn("secret-body", str(caught.exception))
         self.assertIn("secret-body", caught.exception.detail)
         self.assertLessEqual(len(caught.exception.detail), MAX_ERROR_BYTES)
+
+
+    def test_outgoing_credentials_are_scrubbed_from_an_echoed_error_body(self) -> None:
+        import urllib.error
+
+        key = "sk-live-ABCDEF1234567890"
+        headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+
+        class EchoError(urllib.error.HTTPError):
+            code = 401
+            headers = None
+
+            def __init__(self) -> None:
+                pass
+
+            def read(self, amt=None):
+                return f"rejected Authorization: Bearer {key}".encode()
+
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=EchoError()):
+            with self.assertRaises(ProviderHTTPError) as caught:
+                post_json(
+                    "https://example.invalid/v1/chat", headers, {}, 30, sleep=lambda _s: None
+                )
+
+        # A gateway echoing the request must not hand our own key back into a file.
+        self.assertNotIn(key, caught.exception.detail)
+        self.assertIn("[REDACTED]", caught.exception.detail)
+
+    def test_scrub_removes_token_shapes_it_did_not_send(self) -> None:
+        sent = {"Authorization": "Bearer sk-live-ABCDEF1234567890"}
+
+        for original, forbidden in (
+            ('{"access_token": "OTHER-TENANT-SECRET-9876"}', "OTHER-TENANT-SECRET-9876"),
+            ("downstream used xai-AAAABBBBCCCCDDDD", "xai-AAAABBBBCCCCDDDD"),
+            ('{"password":"hunter2-and-more"}', "hunter2-and-more"),
+        ):
+            with self.subTest(original=original):
+                cleaned = scrub(original, sent)
+                self.assertNotIn(forbidden, cleaned)
+                self.assertIn("[REDACTED]", cleaned)
+
+    def test_scrub_leaves_ordinary_diagnostics_alone(self) -> None:
+        text = "model overloaded, retry in 3s; content-type application/json"
+        self.assertEqual(scrub(text, {"Content-Type": "application/json"}), text)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import random
+import re
 import time
 import urllib.error
 import urllib.request
@@ -11,6 +12,57 @@ from typing import Any
 
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 MAX_ERROR_BYTES = 8192
+REDACTED = "[REDACTED]"
+CREDENTIAL_HEADERS = {
+    "api-key",
+    "authorization",
+    "cookie",
+    "proxy-authorization",
+    "x-api-key",
+    "x-goog-api-key",
+}
+SECRET_SHAPES = (
+    # "Bearer <token>" / "token <token>"
+    (re.compile(r"(?i)\b(bearer|token)\s+[A-Za-z0-9._\-]{12,}"), r"\1 " + REDACTED),
+    # a bare vendor-prefixed key
+    (re.compile(r"\b(?:sk|rk|pk|xai|gsk)-[A-Za-z0-9._\-]{12,}"), REDACTED),
+    # a JSON field whose name says it holds a secret
+    (
+        re.compile(
+            r'(?i)"(access_token|refresh_token|id_token|api_key|apikey|client_secret'
+            r'|password|secret|token)"(\s*:\s*)"[^"]*"'
+        ),
+        r'"\1"\2"' + REDACTED + '"',
+    ),
+)
+
+
+def _credentials(headers: dict[str, str]) -> list[str]:
+    """The secret parts of outgoing auth headers, longest first."""
+    found: list[str] = []
+    for name, value in headers.items():
+        if name.lower() not in CREDENTIAL_HEADERS or not value:
+            continue
+        found.append(value)
+        # "Bearer sk-live-..." also leaks as just the token.
+        parts = value.split(" ", 1)
+        if len(parts) == 2 and parts[1]:
+            found.append(parts[1])
+    return sorted({item for item in found if len(item) >= 8}, key=len, reverse=True)
+
+
+def scrub(text: str, headers: dict[str, str] | None = None) -> str:
+    """Remove credentials from provider text before it is written anywhere.
+
+    A gateway that echoes the request can hand back the very key used to call it,
+    so the exact outgoing values are replaced first, then common token shapes
+    that would belong to somebody else.
+    """
+    for secret in _credentials(headers or {}):
+        text = text.replace(secret, REDACTED)
+    for pattern, replacement in SECRET_SHAPES:
+        text = pattern.sub(replacement, text)
+    return text
 RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
 DEFAULT_ATTEMPTS = 3
 
@@ -62,7 +114,10 @@ def _attempt(url: str, headers: dict[str, str], payload: dict[str, Any], timeout
     except urllib.error.HTTPError as exc:
         # Bounded twice: ask for a capped read, then cut what came back. The cap
         # exists precisely because the other side may not be well behaved.
-        body = exc.read(MAX_ERROR_BYTES)[:MAX_ERROR_BYTES].decode("utf-8", errors="replace")
+        body = scrub(
+            exc.read(MAX_ERROR_BYTES)[:MAX_ERROR_BYTES].decode("utf-8", errors="replace"),
+            headers,
+        )
         raise ProviderHTTPError(
             f"provider returned HTTP {exc.code}",
             status=exc.code,
