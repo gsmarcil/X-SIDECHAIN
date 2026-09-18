@@ -28,6 +28,7 @@ class ModelReply:
 @dataclass(frozen=True)
 class DiscussionEvent:
     sequence: int
+    revision: int
     kind: str
     author: str
     content: str
@@ -44,6 +45,7 @@ class DiscussionResult:
     prompt: str
     agents: tuple[AgentSpec, ...]
     events: tuple[DiscussionEvent, ...]
-    synthesizer_id: str
+    chair_id: str
     synthesis: ModelReply
     audit_path: str
+    workspace_root: str

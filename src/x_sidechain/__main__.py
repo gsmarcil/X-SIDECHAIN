@@ -75,7 +75,11 @@ def _task(args: argparse.Namespace) -> str:
 
 
 def _show_event(event: DiscussionEvent) -> None:
-    print(f"\n[{event.sequence} · {event.author} · {event.kind}]\n{event.content}", flush=True)
+    print(
+        f"\n[{event.sequence} · revision {event.revision} · {event.author} · {event.kind}]"
+        f"\n{event.content}",
+        flush=True,
+    )
 
 
 def _interactive_run(orchestrator: SidechainOrchestrator, task: str) -> DiscussionResult:
@@ -87,7 +91,7 @@ def _interactive_run(orchestrator: SidechainOrchestrator, task: str) -> Discussi
             return future.result()
         print(
             "[x-sidechain] Live input enabled. Type a correction or addition and press Enter. "
-            "Use /finish to synthesize now.",
+            "Use /finish to close input and let the chaired workflow finish.",
             flush=True,
         )
         while not future.done():
@@ -103,9 +107,17 @@ def _interactive_run(orchestrator: SidechainOrchestrator, task: str) -> Discussi
             if not message:
                 continue
             if message == "/finish":
-                orchestrator.request_finish()
+                try:
+                    orchestrator.request_finish()
+                except RuntimeError:
+                    if not future.done():
+                        raise
                 continue
-            orchestrator.inject_user_message(message)
+            try:
+                orchestrator.inject_user_message(message)
+            except RuntimeError:
+                if not future.done():
+                    raise
         return future.result()
 
 
@@ -121,7 +133,7 @@ def main() -> int:
         if args.command == "validate-config":
             print(
                 f"PASS: {len(config.providers)} providers, {len(config.agents)} agents, "
-                f"synthesizer={config.synthesizer}"
+                f"chair={config.chair}"
             )
             return 0
         if args.command == "providers":
@@ -136,8 +148,8 @@ def main() -> int:
         if args.command == "run":
             orchestrator = SidechainOrchestrator(
                 agents=_runtimes(config),
-                synthesizer_id=config.synthesizer,
-                contributions_per_agent=config.contributions_per_agent,
+                chair_id=config.chair,
+                max_clarification_questions=config.max_clarification_questions,
                 max_model_calls=config.max_model_calls,
                 progress=lambda message: print(f"[x-sidechain] {message}", flush=True),
                 on_event=_show_event,
@@ -148,7 +160,16 @@ def main() -> int:
                 if args.interactive
                 else orchestrator.run(task)
             )
-            print(json.dumps({"session_id": result.session_id, "audit_path": result.audit_path}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "session_id": result.session_id,
+                        "audit_path": result.audit_path,
+                        "workspace_root": result.workspace_root,
+                    },
+                    indent=2,
+                )
+            )
             print("\n" + result.synthesis.text)
             return 0
     except (RuntimeError, ValueError) as exc:

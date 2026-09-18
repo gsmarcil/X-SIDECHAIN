@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from x_sidechain.models import AgentSpec
+from x_sidechain.workspace import validate_agent_id
 
 
 SUPPORTED_PROTOCOLS = {"responses", "chat_completions", "anthropic_messages"}
@@ -40,9 +41,9 @@ class ProviderConfig:
 class RunConfig:
     providers: dict[str, ProviderConfig]
     agents: tuple[AgentSpec, ...]
-    synthesizer: str
+    chair: str
     request_timeout_seconds: int = 600
-    contributions_per_agent: int = 2
+    max_clarification_questions: int = 4
     max_model_calls: int | None = None
 
 
@@ -160,6 +161,7 @@ def load_config(path: str | Path) -> RunConfig:
         if not isinstance(item, dict):
             raise ValueError(f"{context} must be an object")
         agent_id = _required_string(item, "id", context)
+        validate_agent_id(agent_id)
         provider_id = _required_string(item, "provider", context)
         if agent_id in seen:
             raise ValueError(f"duplicate agent id: {agent_id}")
@@ -175,25 +177,28 @@ def load_config(path: str | Path) -> RunConfig:
             )
         )
 
-    synthesizer = _required_string(raw, "synthesizer", "config")
-    if synthesizer not in seen:
-        raise ValueError("config.synthesizer must reference an agent id")
+    if "chair" in raw and "synthesizer" in raw:
+        raise ValueError("use config.chair only; do not set both chair and legacy synthesizer")
+    chair_key = "chair" if "chair" in raw else "synthesizer"
+    chair = _required_string(raw, chair_key, "config")
+    if chair not in seen:
+        raise ValueError("config.chair must reference an agent id")
     timeout_raw = raw.get("request_timeout_seconds", 600)
     if not isinstance(timeout_raw, int) or isinstance(timeout_raw, bool):
         raise ValueError("request_timeout_seconds must be an integer")
     timeout = timeout_raw
     if timeout < 1 or timeout > 3600:
         raise ValueError("request_timeout_seconds must be between 1 and 3600")
-    contributions_raw = raw.get("contributions_per_agent", 2)
-    if not isinstance(contributions_raw, int) or isinstance(contributions_raw, bool):
-        raise ValueError("contributions_per_agent must be an integer")
-    if contributions_raw < 1 or contributions_raw > 20:
-        raise ValueError("contributions_per_agent must be between 1 and 20")
+    clarification_raw = raw.get("max_clarification_questions", 4)
+    if not isinstance(clarification_raw, int) or isinstance(clarification_raw, bool):
+        raise ValueError("max_clarification_questions must be an integer")
+    if clarification_raw < 0 or clarification_raw > 20:
+        raise ValueError("max_clarification_questions must be between 0 and 20")
     max_calls_raw = raw.get("max_model_calls")
     if max_calls_raw is not None:
         if not isinstance(max_calls_raw, int) or isinstance(max_calls_raw, bool):
             raise ValueError("max_model_calls must be an integer")
-        minimum_calls = contributions_raw * len(agents) * (len(agents) + 1) // 2 + 1
+        minimum_calls = 3 * len(agents) + min(clarification_raw, len(agents)) + 2
         if max_calls_raw < minimum_calls:
             raise ValueError(
                 f"max_model_calls must be at least {minimum_calls} for this configuration"
@@ -201,8 +206,8 @@ def load_config(path: str | Path) -> RunConfig:
     return RunConfig(
         providers=providers,
         agents=tuple(agents),
-        synthesizer=synthesizer,
+        chair=chair,
         request_timeout_seconds=timeout,
-        contributions_per_agent=contributions_raw,
+        max_clarification_questions=clarification_raw,
         max_model_calls=max_calls_raw,
     )

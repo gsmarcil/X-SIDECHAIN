@@ -1,35 +1,36 @@
 # X-SIDECHAIN
 
-X-SIDECHAIN is a provider-agnostic live discussion room for AI agents on Linux.
-Agents do not disappear into separate long answers and compare them afterward.
-They publish short proposals, corrections, challenges, and evidence requests into
-one shared event stream while the discussion is running.
+X-SIDECHAIN is a provider-agnostic, chaired AI team for Linux. Each agent analyzes
+the task in a private file-backed workspace and publishes only a compact brief. A
+designated chair asks targeted clarifying questions, writes a provisional result,
+collects peer reviews, and then issues the final joint decision.
 
-The core is alpha software. Model output remains untrusted, and agreement between
-models is never treated as proof. A graphical interface is intentionally deferred
-until the live-room, authentication, and provider contracts are stable.
+The core is alpha software. Model output remains untrusted, and agreement is never
+treated as proof. A graphical interface is intentionally deferred until the chaired
+workflow, authentication, and provider contracts are stable.
 
-## What v0.3 supports
+## What v0.4 supports
 
-- Any number of agents from two upward; there is no two-agent or three-agent cap.
-- Arbitrary model identifiers and configurable providers.
-- A live shared room whose accepted events are immediately visible to every agent.
-- User corrections and additions while agents or the final synthesizer are working.
-- Provider-neutral mid-run steering: a draft based on an old room version is audited,
-  rejected, and regenerated against the new state before it can be published.
-- Fair contribution quotas, a configurable model-call budget, and a selected final
-  synthesizer.
-- OpenAI Responses-compatible, Chat Completions-compatible, and Anthropic
+- Any number of agents from two upward and arbitrary model identifiers.
+- A private workspace per agent and per task revision, with local `0700` directories
+  and `0600` files.
+- Parallel private analysis followed by a bounded public summary from each agent.
+- A configurable chair that reads summaries, not other agents' private notes.
+- Optional questions directed only to the specific agent whose brief is ambiguous.
+- A chair draft, parallel peer review, and evidence-gated final result.
+- User corrections while the team is working. A correction increments the task
+  revision and restarts the affected chaired cycle instead of mixing two states.
+- A hard model-call budget and tamper-evident JSONL audit trail.
+- Responses-compatible, Chat Completions-compatible, and Anthropic
   Messages-compatible endpoints.
-- API-key authentication, no-auth local endpoints, and standards-based OAuth 2.0
-  Device Authorization Grant when the provider officially exposes it.
-- Tamper-evident local JSONL audit trails and offline verification.
+- API keys, trusted local no-auth endpoints, and official OAuth Device Flow where a
+  provider exposes it.
 
-The room exchanges concise public reasoning summaries. It neither requests nor
-claims access to a model's hidden chain-of-thought. Native provider steering can be
-added as a capability optimization; stale-draft rejection is the universal fallback.
+The private workspace contains an auditable work product—claims, evidence,
+uncertainty, and tests—not hidden chain-of-thought. Isolation currently means that
+other model prompts never receive those files. It is not yet a tool-execution sandbox.
 
-## Install from source
+## Install
 
 Requirements: Linux and Python 3.11+.
 
@@ -42,67 +43,51 @@ python -m pip install -e .
 cp x-sidechain.example.json x-sidechain.json
 ```
 
-Edit `x-sidechain.json`: add providers, then add as many agents as needed. The
-`model` value is not selected from a hard-coded list.
+Edit `x-sidechain.json` to define providers and agents. A model name is passed to
+the provider unchanged; it is not selected from a hard-coded catalog.
 
-Export only the credentials referenced by the selected agents. For example:
-
-```bash
-export OPENAI_API_KEY='...'
-export ANTHROPIC_API_KEY='...'
-export XAI_API_KEY='...'
-export OPENROUTER_API_KEY='...'
-```
-
-## Validate and run
+## Run
 
 ```bash
 x-sidechain validate-config --config x-sidechain.json
-x-sidechain providers --config x-sidechain.json
-x-sidechain run --config x-sidechain.json --prompt 'Analyze this claim and identify the decisive evidence.'
+x-sidechain run --config x-sidechain.json --prompt 'Test this claim and identify decisive evidence.'
 ```
 
-To join the discussion while it is running:
+To add a fact or correction while the team is working:
 
 ```bash
 x-sidechain run --interactive --config x-sidechain.json --prompt 'Test the original hypothesis.'
 ```
 
-Type any correction or additional idea and press Enter. It becomes a `user.steering`
-event immediately. In-flight drafts based on the previous room state cannot be
-accepted. Type `/finish` to stop requesting more agent contributions and synthesize
-from the accepted room state.
+Type the update and press Enter. `/finish` closes further keyboard input and lets
+the current chaired workflow finish; the workflow is already bounded and does not
+need `/finish` to complete.
 
-A long initial prompt can be read from a UTF-8 file using `--prompt-file task.md`.
-The final answer is printed to the terminal, and every accepted or superseded
-artifact is recorded in the audit path printed by the command.
+The command prints the final result plus two paths:
 
-## Authentication modes
+- `audit_path`: hash-chained session record.
+- `workspace_root`: private analyses, public briefs, clarifications, draft, reviews,
+  and final result, grouped by revision and agent.
+
+## Authentication
 
 `api_key` reads a secret from the configured environment variable. `none` is for
-trusted local endpoints such as Ollama. `oauth_device` is available only when a
-provider publishes an official OAuth Device Flow and supplies its device/token
-endpoints and a client ID:
+trusted local endpoints. `oauth_device` is available only when a provider publishes
+an official OAuth Device Flow:
 
 ```bash
 x-sidechain auth login PROVIDER_ID --config x-sidechain.json
 ```
 
-The command opens the provider's official verification page. Any email, approval,
-or account challenge is performed by the provider on that page; X-SIDECHAIN never
-scrapes login pages or reads account email. OAuth tokens are stored in Linux Secret
-Service through `secret-tool`, never in the JSON configuration.
+Email, MFA, consent, and account challenges remain on the provider's official page.
+X-SIDECHAIN never scrapes login pages or reads email. OAuth tokens are stored through
+Linux Secret Service using `secret-tool`.
 
-## Verify an audit trail
-
-```bash
-x-sidechain verify ~/.local/share/x-sidechain/sessions/SESSION_ID.jsonl
-```
-
-## Development
+## Development and audit verification
 
 ```bash
 make check
+x-sidechain verify ~/.local/share/x-sidechain/sessions/SESSION_ID.jsonl
 ```
 
 See [Architecture](docs/ARCHITECTURE.md),
@@ -110,7 +95,8 @@ See [Architecture](docs/ARCHITECTURE.md),
 
 ## Roadmap
 
-- Add native WebSocket mid-turn steering adapters where providers support it.
-- Add streaming, request cancellation, retry policy, and context compaction.
-- Build the Linux UI only after the live-room interfaces become stable.
-- Add signed audit exports, evidence attachments, `.deb`, and AppImage artifacts.
+- Add sandboxed tools scoped to each agent workspace.
+- Add native streaming and mid-turn steering where providers support it.
+- Add retries, context compaction, and richer artifact manifests.
+- Build the Linux UI on the stable chaired-workflow event stream.
+- Add signed exports, `.deb`, and AppImage artifacts.

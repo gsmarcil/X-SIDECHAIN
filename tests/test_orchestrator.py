@@ -1,3 +1,5 @@
+import json
+import stat
 import tempfile
 import threading
 import unittest
@@ -9,50 +11,41 @@ from x_sidechain.models import AgentSpec, ModelReply
 from x_sidechain.orchestrator import AgentRuntime, SidechainOrchestrator
 
 
-class FakeProvider:
-    def __init__(self, name: str) -> None:
+class ScriptedProvider:
+    def __init__(self, name: str, question_target: str | None = None) -> None:
         self.name = name
         self.model = f"{name}-model"
+        self.question_target = question_target
         self.calls: list[tuple[str, str]] = []
         self._lock = threading.Lock()
 
     def generate(self, system: str, prompt: str) -> ModelReply:
         with self._lock:
-            call_number = len(self.calls) + 1
             self.calls.append((system, prompt))
-        return ModelReply(self.name, self.model, f"{self.name}-reply-{call_number}")
+            call_number = len(self.calls)
+        if prompt.startswith("PRIVATE WORKSPACE ANALYSIS"):
+            text = f"private analysis from {self.name}"
+        elif prompt.startswith("Create the public brief"):
+            text = f"CLAIM: public summary from {self.name}"
+        elif "Return JSON only:" in prompt:
+            questions = []
+            if self.question_target:
+                questions = [{"agent_id": self.question_target, "question": "What artifact proves it?"}]
+            text = json.dumps({"questions": questions})
+        elif prompt.startswith("Answer one targeted chair question"):
+            text = f"clarification from {self.name}"
+        elif prompt.startswith("CHAIR DRAFT"):
+            text = f"chair draft from {self.name}"
+        elif prompt.startswith("REVIEW THE CHAIR DRAFT"):
+            text = f"VERDICT: APPROVE\nERROR: NONE\nCORRECTION: NONE\nEVIDENCE: {self.name}"
+        elif prompt.startswith("FINAL RESULT"):
+            text = f"final result from {self.name}"
+        else:
+            raise AssertionError(f"unexpected prompt: {prompt[:80]}")
+        return ModelReply(self.name, self.model, text, request_id=f"req-{call_number}")
 
 
-class BlockingFirstProvider(FakeProvider):
-    def __init__(
-        self,
-        name: str,
-        started_count: list[int],
-        started_lock: threading.Lock,
-        all_started: threading.Event,
-        release: threading.Event,
-    ) -> None:
-        super().__init__(name)
-        self.started_count = started_count
-        self.started_lock = started_lock
-        self.all_started = all_started
-        self.release = release
-
-    def generate(self, system: str, prompt: str) -> ModelReply:
-        with self._lock:
-            call_number = len(self.calls) + 1
-            self.calls.append((system, prompt))
-        if call_number == 1:
-            with self.started_lock:
-                self.started_count[0] += 1
-                if self.started_count[0] == 2:
-                    self.all_started.set()
-            if not self.release.wait(timeout=5):
-                raise RuntimeError("test release timeout")
-        return ModelReply(self.name, self.model, f"{self.name}-reply-{call_number}")
-
-
-def runtime(agent_id: str, provider: FakeProvider) -> AgentRuntime:
+def runtime(agent_id: str, provider: ScriptedProvider) -> AgentRuntime:
     return AgentRuntime(
         AgentSpec(agent_id, provider.name, provider.model, f"role-{agent_id}"),
         provider,
@@ -60,148 +53,154 @@ def runtime(agent_id: str, provider: FakeProvider) -> AgentRuntime:
 
 
 class OrchestratorTests(unittest.TestCase):
-    def test_user_steering_supersedes_inflight_drafts(self) -> None:
+    def test_chaired_workflow_targets_one_agent_and_creates_workspaces(self) -> None:
+        chair = ScriptedProvider("chair-provider", question_target="agent-1")
+        peer_one = ScriptedProvider("peer-one")
+        peer_two = ScriptedProvider("peer-two")
+        agents = (
+            runtime("chair", chair),
+            runtime("agent-1", peer_one),
+            runtime("agent-2", peer_two),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = SidechainOrchestrator(
+                agents,
+                chair_id="chair",
+                audit_directory=Path(directory),
+            ).run("test exact claim")
+
+            kinds = [event.kind for event in result.events]
+            self.assertEqual(kinds.count("agent.summary"), 3)
+            self.assertEqual(kinds.count("chair.question"), 1)
+            self.assertEqual(kinds.count("agent.clarification"), 1)
+            self.assertEqual(kinds.count("chair.draft"), 1)
+            self.assertEqual(kinds.count("agent.review"), 2)
+            self.assertEqual(kinds.count("chair.final"), 1)
+            clarification = next(event for event in result.events if event.kind == "agent.clarification")
+            self.assertEqual(clarification.author, "agent-1")
+            self.assertFalse(any(event.author == "agent-2" for event in result.events if event.kind == "agent.clarification"))
+            chair_phase_prompts = [
+                prompt
+                for _, prompt in chair.calls
+                if not prompt.startswith("PRIVATE WORKSPACE ANALYSIS")
+                and not prompt.startswith("Create the public brief")
+            ]
+            self.assertTrue(all("private analysis from peer-one" not in prompt for prompt in chair_phase_prompts))
+            self.assertTrue(all("private analysis from peer-two" not in prompt for prompt in chair_phase_prompts))
+
+            workspace = Path(result.workspace_root)
+            expected = [
+                workspace / "revision-0/agents/chair/analysis.md",
+                workspace / "revision-0/agents/chair/summary.md",
+                workspace / "revision-0/agents/chair/chair/questions.json",
+                workspace / "revision-0/agents/chair/chair/draft.md",
+                workspace / "revision-0/agents/chair/chair/final.md",
+                workspace / "revision-0/agents/agent-1/clarification.md",
+                workspace / "revision-0/agents/agent-2/review.md",
+            ]
+            for path in expected:
+                self.assertTrue(path.is_file(), path)
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(workspace.stat().st_mode), 0o700)
+            valid, message = AuditLog.verify(result.audit_path)
+            self.assertTrue(valid, message)
+
+    def test_user_update_restarts_private_work_cycle(self) -> None:
         started_count = [0]
         started_lock = threading.Lock()
         all_started = threading.Event()
         release = threading.Event()
-        providers = [
-            BlockingFirstProvider(
-                f"provider-{index}",
-                started_count,
-                started_lock,
-                all_started,
-                release,
-            )
-            for index in range(2)
-        ]
-        observed = []
+
+        class BlockingProvider(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                if prompt.startswith("PRIVATE WORKSPACE ANALYSIS"):
+                    with started_lock:
+                        started_count[0] += 1
+                        if started_count[0] == 2:
+                            all_started.set()
+                    if started_count[0] <= 2 and not release.wait(timeout=5):
+                        raise RuntimeError("test release timeout")
+                return super().generate(system, prompt)
+
+        chair = BlockingProvider("chair")
+        peer = BlockingProvider("peer")
         with tempfile.TemporaryDirectory() as directory:
             orchestrator = SidechainOrchestrator(
-                agents=tuple(runtime(f"agent-{index}", provider) for index, provider in enumerate(providers)),
-                synthesizer_id="agent-0",
-                contributions_per_agent=1,
+                (runtime("chair", chair), runtime("peer", peer)),
+                chair_id="chair",
+                max_clarification_questions=0,
                 audit_directory=Path(directory),
-                on_event=observed.append,
             )
             with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(orchestrator.run, "test exact claim")
+                future = pool.submit(orchestrator.run, "original task")
                 self.assertTrue(orchestrator.wait_until_active(timeout=2))
                 self.assertTrue(all_started.wait(timeout=2))
-                steering = orchestrator.inject_user_message("also test the corrected boundary")
+                steering = orchestrator.inject_user_message("include the corrected boundary")
                 release.set()
                 result = future.result(timeout=10)
 
-            contributions = [event for event in result.events if event.kind == "agent.contribution"]
-            self.assertEqual(len(contributions), 2)
-            self.assertEqual({event.author for event in contributions}, {"agent-0", "agent-1"})
-            self.assertTrue(all(event.based_on_sequence >= steering.sequence for event in contributions))
-            self.assertTrue(
-                all(
-                    any("also test the corrected boundary" in prompt for _, prompt in provider.calls[1:])
-                    for provider in providers
-                )
-            )
-            self.assertEqual(observed[0], steering)
-            valid, message = AuditLog.verify(result.audit_path)
-            self.assertTrue(valid, message)
-            audit_text = Path(result.audit_path).read_text(encoding="utf-8")
-            self.assertGreaterEqual(audit_text.count("room.draft_superseded"), 2)
-            self.assertIn("also test the corrected boundary", providers[0].calls[-1][1])
+            current_summaries = [event for event in result.events if event.kind == "agent.summary"]
+            self.assertEqual(len(current_summaries), 2)
+            self.assertTrue(all(event.revision == steering.revision for event in current_summaries))
+            all_prompts = [prompt for provider in (chair, peer) for _, prompt in provider.calls]
+            self.assertTrue(any("include the corrected boundary" in prompt for prompt in all_prompts))
+            workspace = Path(result.workspace_root)
+            self.assertTrue((workspace / "revision-0/agents/chair/analysis.md").is_file())
+            self.assertTrue((workspace / "revision-1/agents/chair/analysis.md").is_file())
+            self.assertIn("cycle.superseded", Path(result.audit_path).read_text(encoding="utf-8"))
 
-    def test_three_agents_each_contribute_twice(self) -> None:
-        providers = [FakeProvider(f"provider-{index}") for index in range(3)]
-        with tempfile.TemporaryDirectory() as directory:
-            result = SidechainOrchestrator(
-                agents=tuple(runtime(f"agent-{index}", provider) for index, provider in enumerate(providers)),
-                synthesizer_id="agent-1",
-                contributions_per_agent=2,
-                audit_directory=Path(directory),
-            ).run("test exact claim")
+    def test_user_update_during_final_restarts_before_commit(self) -> None:
+        final_started = threading.Event()
+        release = threading.Event()
 
-            contributions = [event for event in result.events if event.kind == "agent.contribution"]
-            self.assertEqual(len(contributions), 6)
-            for index in range(3):
-                self.assertEqual(
-                    sum(event.author == f"agent-{index}" for event in contributions),
-                    2,
-                )
-            sequence_numbers = [event.sequence for event in result.events]
-            self.assertEqual(sequence_numbers, list(range(len(result.events))))
-            self.assertIn("ACCEPTED LIVE EVENTS", providers[1].calls[-1][1])
-            valid, message = AuditLog.verify(result.audit_path)
-            self.assertTrue(valid, message)
-
-    def test_user_steering_supersedes_inflight_synthesis(self) -> None:
-        synthesis_started = threading.Event()
-        release_synthesis = threading.Event()
-
-        class BlockingSynthesizer(FakeProvider):
+        class BlockingChair(ScriptedProvider):
             def generate(self, system: str, prompt: str) -> ModelReply:
-                with self._lock:
-                    call_number = len(self.calls) + 1
-                    self.calls.append((system, prompt))
-                if "ACCEPTED LIVE EVENTS" in prompt and not synthesis_started.is_set():
-                    synthesis_started.set()
-                    if not release_synthesis.wait(timeout=5):
-                        raise RuntimeError("test synthesis release timeout")
-                return ModelReply(self.name, self.model, f"{self.name}-reply-{call_number}")
+                if prompt.startswith("FINAL RESULT") and not final_started.is_set():
+                    final_started.set()
+                    if not release.wait(timeout=5):
+                        raise RuntimeError("test final release timeout")
+                return super().generate(system, prompt)
 
-        synthesizer = BlockingSynthesizer("synth")
-        peer = FakeProvider("peer")
+        chair = BlockingChair("chair")
+        peer = ScriptedProvider("peer")
         with tempfile.TemporaryDirectory() as directory:
             orchestrator = SidechainOrchestrator(
-                agents=(runtime("synth", synthesizer), runtime("peer", peer)),
-                synthesizer_id="synth",
-                contributions_per_agent=1,
+                (runtime("chair", chair), runtime("peer", peer)),
+                chair_id="chair",
+                max_clarification_questions=0,
                 audit_directory=Path(directory),
             )
             with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(orchestrator.run, "test exact claim")
-                self.assertTrue(synthesis_started.wait(timeout=5))
-                steering = orchestrator.inject_user_message("correct the final constraint")
-                release_synthesis.set()
+                future = pool.submit(orchestrator.run, "original task")
+                self.assertTrue(final_started.wait(timeout=5))
+                steering = orchestrator.inject_user_message("new fact before the verdict")
+                release.set()
                 result = future.result(timeout=10)
 
-            self.assertEqual(result.events[-1], steering)
-            synthesis_prompts = [prompt for _, prompt in synthesizer.calls if "ACCEPTED LIVE EVENTS" in prompt]
-            self.assertEqual(len(synthesis_prompts), 2)
-            self.assertNotIn("correct the final constraint", synthesis_prompts[0])
-            self.assertIn("correct the final constraint", synthesis_prompts[1])
-            audit_text = Path(result.audit_path).read_text(encoding="utf-8")
-            self.assertIn("synthesis.draft_superseded", audit_text)
+            self.assertEqual(result.events[-1].kind, "chair.final")
+            self.assertEqual(result.events[-1].revision, steering.revision)
+            final_prompts = [prompt for _, prompt in chair.calls if prompt.startswith("FINAL RESULT")]
+            self.assertEqual(len(final_prompts), 2)
+            self.assertNotIn("new fact before the verdict", final_prompts[0])
+            self.assertIn("new fact before the verdict", final_prompts[1])
 
     def test_failed_provider_closes_session_with_valid_audit(self) -> None:
-        class FailingProvider(FakeProvider):
+        class FailingProvider(ScriptedProvider):
             def generate(self, system: str, prompt: str) -> ModelReply:
                 raise RuntimeError("definitive failure")
 
         agents = (
-            runtime("ok", FakeProvider("ok")),
+            runtime("chair", ScriptedProvider("chair")),
             runtime("fail", FailingProvider("fail")),
         )
         with tempfile.TemporaryDirectory() as directory:
-            orchestrator = SidechainOrchestrator(
-                agents,
-                "ok",
-                audit_directory=Path(directory),
-            )
+            orchestrator = SidechainOrchestrator(agents, "chair", audit_directory=Path(directory))
             with self.assertRaisesRegex(RuntimeError, "definitive failure"):
                 orchestrator.run("claim")
-            logs = list(Path(directory).glob("*.jsonl"))
-            self.assertEqual(len(logs), 1)
-            valid, message = AuditLog.verify(logs[0])
+            log = next(Path(directory).glob("*.jsonl"))
+            valid, message = AuditLog.verify(log)
             self.assertTrue(valid, message)
-            self.assertIn("session.failed", logs[0].read_text(encoding="utf-8"))
-
-    def test_steering_requires_an_active_room(self) -> None:
-        agents = (
-            runtime("a", FakeProvider("a")),
-            runtime("b", FakeProvider("b")),
-        )
-        orchestrator = SidechainOrchestrator(agents, "a")
-        with self.assertRaisesRegex(RuntimeError, "no live discussion"):
-            orchestrator.inject_user_message("too early")
+            self.assertIn("session.failed", log.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

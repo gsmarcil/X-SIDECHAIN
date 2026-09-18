@@ -1,63 +1,79 @@
 # Architecture
 
-X-SIDECHAIN is a local Linux application. It sends the room state directly to the
-configured model endpoints; no X-SIDECHAIN relay or hosted backend is required.
+X-SIDECHAIN is a local chaired-agent system. It sends prompts directly to configured
+providers; no X-SIDECHAIN relay or hosted backend is required.
 
-## Live-room protocol
+## Moderated protocol
 
-The unit of collaboration is a public `DiscussionEvent`, not a completed private
-answer. Events contain a sequence number, author, kind, content, and the room sequence
-on which the contribution was based.
+For `N` agents and one configured chair:
 
-For `N` configured agents:
+1. **Private work** — every agent independently creates `analysis.md` in its own
+   revision workspace. No peer or chair prompt receives this note.
+2. **Public brief** — the same agent condenses its work into `summary.md` with claim,
+   evidence, uncertainty, fastest test, and stop condition.
+3. **Chair triage** — the chair reads all public briefs and returns zero or more
+   targeted questions. Each question names exactly one agent; there is at most one
+   question per agent and a configured total limit.
+4. **Targeted clarification** — only named agents receive their question, their own
+   private note, and their own public brief.
+5. **Chair draft** — the chair creates a provisional decision from public briefs and
+   clarifications.
+6. **Peer review** — every non-chair agent compares the draft with its own workspace
+   and returns `APPROVE` or one exact correction.
+7. **Final decision** — the chair revises the draft using peer reviews and preserves
+   unresolved disagreement.
 
-1. The user's task becomes event `0` in one shared room.
-2. Eligible agents begin drafting a single compact contribution against the current
-   sequence.
-3. The first valid draft commits as the next event.
-4. Any concurrent draft based on an older sequence becomes `draft_superseded`; it is
-   audited but never shown as an accepted contribution. Its agent retries with the
-   updated room, including the new correction or idea.
-5. Contribution-count fairness prevents a fast provider from monopolizing the room.
-6. User input is appended by the same mechanism and invalidates in-flight old drafts.
-7. Final synthesis is also optimistic: user input arriving during synthesis invalidates
-   that draft and forces a new synthesis from the latest event stream.
+This topology avoids a free-for-all room: agents cannot continuously interrupt one
+another, the chair controls clarification, and every public message has a phase.
 
-This is optimistic concurrency control for model conversation. It gives every
-accepted statement a precise `based_on_sequence` and provides provider-neutral
-mid-run correction without pretending that all APIs can mutate an active inference.
+## User corrections and revisions
 
-## Public reasoning, not hidden thought
+Interactive user input increments the task revision. Every model call in a cycle is
+bound to the revision snapshot used to create it. If the revision changes before a
+phase or final result commits, the cycle is marked `cycle.superseded` and restarts
+from private analysis using the original task plus all user updates.
 
-Agents publish bounded reasoning summaries in the form `TYPE`, `CLAIM`, `BASIS`,
-`TARGET`, and `NEXT_ACTION`. X-SIDECHAIN does not request, store, or expose private
-chain-of-thought. “Live thinking” therefore means a fast stream of explicit,
-auditable contributions that other participants can correct before the final answer.
+Earlier work is retained under `revision-N`; it is never silently overwritten. This
+is more expensive than patching a single response but gives a clear audit boundary.
 
-## Native steering and fallback
+## Workspace layout
 
-Some providers/models expose a transport that can accept input during an active
-response. Future adapters can use that capability to avoid discarded work. The base
-contract remains stale-draft rejection so arbitrary compatible providers can still
-participate correctly. This may consume more model calls than a staged debate.
+```text
+SESSION_ID/workspaces/
+  revision-0/agents/AGENT_ID/
+    analysis.md
+    summary.md
+    clarification.md        # only when asked
+    review.md               # non-chair agents
+    chair/                  # chair only
+      questions.json
+      draft.md
+      final.md
+```
 
-With no user intervention, `C` contributions per agent require at most
-`C × N × (N + 1) / 2 + 1` model calls under the current fallback, including one
-synthesis. Each mid-run correction can supersede additional active drafts. A hard
-`max_model_calls` budget fails closed before an unbounded retry loop.
+Directories use mode `0700` and files `0600`. Agent IDs are restricted to safe ASCII
+path components. Isolation is currently prompt-level and file-layout isolation: the
+provider receives only content explicitly selected for that phase. Models have no
+filesystem or shell tool access yet.
 
-## Extension boundaries
+## Calls and budget
 
-- `config.py`: versioned provider, authentication, agent, and run configuration.
-- `auth.py`: environment credentials and official OAuth Device Flow.
-- `providers/`: protocol adapters behind `Provider.generate`.
-- `orchestrator.py`: shared event stream, fairness, stale-draft rejection, user
-  steering, and optimistic synthesis.
-- `prompts.py`: public contribution contract and evidence-gated synthesis.
-- `audit.py`: append-only SHA-256 chained session records.
-- `__main__.py`: configuration-first CLI, interactive steering, and verification.
+The maximum calls in one full cycle are:
 
-## UI boundary
+`3N + min(Q, N) + 2`
 
-There is no UI in v0.3. The later Linux UI will subscribe to the same event callback
-and call `inject_user_message`; it will not own provider logic or credentials.
+where `Q` is `max_clarification_questions`. This includes two calls per agent for
+private analysis and summary, chair triage and draft, up to `Q` clarifications,
+`N - 1` peer reviews, and the final chair call. User revisions can restart a cycle,
+so `max_model_calls` is a hard admission budget across the whole session.
+
+## Module boundaries
+
+- `config.py`: providers, agents, chair, limits, and authentication configuration.
+- `workspace.py`: safe agent paths and local permissions.
+- `auth.py`: API credentials and official OAuth Device Flow.
+- `providers/`: wire-protocol adapters.
+- `orchestrator.py`: phase machine, targeted routing, revisions, and call budget.
+- `prompts.py`: per-phase information boundaries.
+- `audit.py`: SHA-256 chained session records.
+- `__main__.py`: CLI, interactive user updates, and audit verification.

@@ -21,7 +21,7 @@ def valid_config() -> dict:
             {"id": "two", "provider": "custom", "model": "model-b", "role": "role two"},
             {"id": "three", "provider": "custom", "model": "model-c", "role": "role three"},
         ],
-        "synthesizer": "two",
+        "chair": "two",
     }
 
 
@@ -50,9 +50,9 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate"):
             self._load(raw)
 
-    def test_non_integer_contribution_count_is_rejected(self) -> None:
+    def test_non_integer_clarification_limit_is_rejected(self) -> None:
         raw = valid_config()
-        raw["contributions_per_agent"] = "two"
+        raw["max_clarification_questions"] = "two"
         with self.assertRaisesRegex(ValueError, "integer"):
             self._load(raw)
 
@@ -69,10 +69,21 @@ class ConfigTests(unittest.TestCase):
 
     def test_call_budget_cannot_be_below_live_room_minimum(self) -> None:
         raw = valid_config()
-        raw["contributions_per_agent"] = 2
-        raw["max_model_calls"] = 12
-        with self.assertRaisesRegex(ValueError, "at least 13"):
+        raw["max_clarification_questions"] = 3
+        raw["max_model_calls"] = 13
+        with self.assertRaisesRegex(ValueError, "at least 14"):
             self._load(raw)
+
+    def test_unsafe_agent_id_is_rejected(self) -> None:
+        raw = valid_config()
+        raw["agents"][0]["id"] = "../escape"
+        with self.assertRaisesRegex(ValueError, "agent id"):
+            self._load(raw)
+
+    def test_legacy_synthesizer_key_is_migrated(self) -> None:
+        raw = valid_config()
+        raw["synthesizer"] = raw.pop("chair")
+        self.assertEqual(self._load(raw).chair, "two")
 
 
 if __name__ == "__main__":
