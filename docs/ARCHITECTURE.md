@@ -27,6 +27,11 @@ For `N` agents and one configured chair:
 7. **Final decision** — the chair revises the draft using peer reviews and preserves
    unresolved disagreement.
 
+A provider failure at any step is recorded as that agent abstaining, published as
+`agent.abstention`, and carried into the chair's draft and final prompts, which are
+told to read absence as missing evidence rather than as agreement. The session stops
+only when the chair itself fails or when fewer than `min_agent_quorum` briefs exist.
+
 This topology avoids a free-for-all room: agents cannot continuously interrupt one
 another, the chair controls clarification, and every public message has a phase.
 
@@ -40,13 +45,20 @@ from private analysis using the original task plus all user updates.
 Earlier work is retained under `revision-N`; it is never silently overwritten. This
 is more expensive than patching a single response but gives a clear audit boundary.
 
+Because each correction pays for a whole new cycle, corrections are refused once any
+of three bounds is reached: `max_revisions`, the session deadline, or a remaining
+call budget smaller than one full cycle. A refused correction is reported to the user
+and leaves the running cycle free to finish, which is what guarantees that a session
+ends with a result rather than an exhausted budget.
+
 ## Workspace layout
 
 ```text
 SESSION_ID/workspaces/
   revision-0/agents/AGENT_ID/
     analysis.md
-    summary.md
+    summary.md             # published brief, capped at max_public_brief_chars
+    summary.full.md        # only when the brief had to be cut
     clarification.md        # only when asked
     review.md               # non-chair agents
     chair/                  # chair only

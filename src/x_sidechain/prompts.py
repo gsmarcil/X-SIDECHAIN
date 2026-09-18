@@ -32,14 +32,21 @@ conditions, and the fastest safe test. This note stays in your agent workspace a
 not shown to peers or the chair."""
 
 
-def public_summary_prompt(task: str, steering: Sequence[str], analysis: str) -> str:
+def public_summary_prompt(
+    task: str,
+    steering: Sequence[str],
+    analysis: str,
+    limit: int = 1200,
+) -> str:
     return f"""Create the public brief that the room chair will read.
 {_task_context(task, steering)}
 
 PRIVATE ANALYSIS WORK PRODUCT
 {analysis}
 
-Do not dump the full analysis. Use exactly these fields and stay under 1,200 characters:
+Do not dump the full analysis. Use exactly these fields and stay under {limit:,} characters.
+Anything past that limit is cut off before the chair sees it, so put the decisive
+content first:
 CLAIM:
 EVIDENCE:
 UNCERTAINTY:
@@ -92,11 +99,18 @@ Reply with the direct answer, supporting artifact, remaining uncertainty, and on
 decisive next action. Do not broaden the discussion."""
 
 
+def _abstentions(abstentions: Mapping[str, str]) -> str:
+    if not abstentions:
+        return "NONE"
+    return "\n".join(f"- {name}: {reason}" for name, reason in abstentions.items())
+
+
 def chair_draft_prompt(
     task: str,
     steering: Sequence[str],
     summaries: Mapping[str, str],
     clarifications: Mapping[str, str],
+    abstentions: Mapping[str, str] | None = None,
 ) -> str:
     clarification_text = _named(clarifications, "CLARIFICATION") if clarifications else "NONE"
     return f"""CHAIR DRAFT. Produce a provisional joint result from the public briefs
@@ -110,6 +124,10 @@ PUBLIC BRIEFS
 
 TARGETED CLARIFICATIONS
 {clarification_text}
+
+AGENTS THAT DID NOT REPORT
+{_abstentions(abstentions or {})}
+Treat a missing agent as absent evidence, never as agreement.
 
 Use these sections: PROVISIONAL_VERDICT, SUPPORTED_CLAIMS, UNSUPPORTED_CLAIMS,
 DISAGREEMENTS, DECISIVE_EVIDENCE, NEXT_ACTION."""
@@ -146,6 +164,7 @@ def final_prompt(
     steering: Sequence[str],
     draft: str,
     reviews: Mapping[str, str],
+    abstentions: Mapping[str, str] | None = None,
 ) -> str:
     return f"""FINAL RESULT. Revise the chair draft using the peer reviews. Agreement
 is not proof. Promote a claim to PROVEN only with an observable artifact; otherwise
@@ -159,6 +178,11 @@ CHAIR DRAFT
 PEER REVIEWS
 {_named(reviews, 'REVIEW')}
 
+AGENTS THAT DID NOT REPORT
+{_abstentions(abstentions or {})}
+An absent agent reviewed nothing. Say so in COVERAGE rather than counting it as
+agreement, and lower confidence accordingly.
+
 Use exactly these sections:
 VERDICT
 CLAIM
@@ -168,5 +192,6 @@ FASTEST_PATH
 STOP_CONDITION
 AGREED
 DISPUTED
+COVERAGE
 NEXT_DECISIVE_TEST
 EVIDENCE_REFERENCES"""

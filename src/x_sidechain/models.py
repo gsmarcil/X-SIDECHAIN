@@ -51,3 +51,4 @@ class DiscussionResult:
     workspace_root: str
     model_calls: int = 0
     usage_totals: dict[str, int] = field(default_factory=dict)
+    abstentions: dict[str, str] = field(default_factory=dict)

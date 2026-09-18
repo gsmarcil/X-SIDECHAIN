@@ -76,5 +76,9 @@
   "chair": "validator",
   "max_clarification_questions": 4,
   "max_model_calls": 54,
-  "request_timeout_seconds": 600
+  "request_timeout_seconds": 600,
+  "min_agent_quorum": 3,
+  "max_revisions": 8,
+  "session_deadline_seconds": 3600,
+  "max_public_brief_chars": 1200
 }

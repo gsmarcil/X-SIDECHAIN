@@ -48,6 +48,8 @@ Do not combine providers that are not all authorized to receive the task materia
   an external timestamp. Reopening an existing log continues its chain; a log that
   already fails verification is never extended.
 - Superseded revision work remains in local workspaces and audit logs.
+- An abstaining agent contributes no evidence. The chair is instructed never to read
+  an absence as agreement, and every abstention is recorded with its cause.
 - Model output is untrusted text and is never executed.
 - `max_model_calls` prevents the application from starting calls beyond the session
   budget; calls already accepted by a provider may still be billed. Transport retries

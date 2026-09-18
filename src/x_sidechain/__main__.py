@@ -125,9 +125,9 @@ def _interactive_run(orchestrator: SidechainOrchestrator, task: str) -> Discussi
             try:
                 orchestrator.inject_user_message(message)
             except (RuntimeError, ValueError) as exc:
-                # Losing a finished session over a late keystroke would waste the
-                # whole model-call budget, so report and keep the result.
-                print(f"[x-sidechain] input ignored: {exc}", flush=True)
+                # A late keystroke or a refused correction (revision cap, deadline,
+                # remaining budget) must never discard a session already paid for.
+                print(f"[x-sidechain] correction refused: {exc}", flush=True)
                 accepting = isinstance(exc, ValueError)
         return future.result()
 
@@ -144,7 +144,8 @@ def main() -> int:
         if args.command == "validate-config":
             print(
                 f"PASS: {len(config.providers)} providers, {len(config.agents)} agents, "
-                f"chair={config.chair}"
+                f"chair={config.chair}, quorum={config.min_agent_quorum}, "
+                f"max_revisions={config.max_revisions}"
             )
             return 0
         if args.command == "providers":
@@ -162,6 +163,10 @@ def main() -> int:
                 chair_id=config.chair,
                 max_clarification_questions=config.max_clarification_questions,
                 max_model_calls=config.max_model_calls,
+                min_agent_quorum=config.min_agent_quorum,
+                max_revisions=config.max_revisions,
+                session_deadline_seconds=config.session_deadline_seconds,
+                max_public_brief_chars=config.max_public_brief_chars,
                 progress=lambda message: print(f"[x-sidechain] {message}", flush=True),
                 on_event=_show_event,
             )
@@ -179,6 +184,7 @@ def main() -> int:
                         "workspace_root": result.workspace_root,
                         "model_calls": result.model_calls,
                         "usage_totals": result.usage_totals,
+                        "abstentions": result.abstentions,
                     },
                     indent=2,
                 )

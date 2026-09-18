@@ -2,6 +2,7 @@ import json
 import stat
 import tempfile
 import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -271,6 +272,206 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(result.model_calls, 8)
             self.assertEqual(result.usage_totals, {"input_tokens": 80, "output_tokens": 16})
             self.assertIn("usage_totals", Path(result.audit_path).read_text(encoding="utf-8"))
+
+    def test_one_failing_agent_abstains_and_the_room_still_decides(self) -> None:
+        class FailingProvider(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                raise RuntimeError("provider unavailable")
+
+        agents = (
+            runtime("chair", ScriptedProvider("chair")),
+            runtime("peer", ScriptedProvider("peer")),
+            runtime("down", FailingProvider("down")),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = SidechainOrchestrator(
+                agents,
+                chair_id="chair",
+                max_clarification_questions=0,
+                min_agent_quorum=2,
+                audit_directory=Path(directory),
+            ).run("claim")
+
+            self.assertEqual(result.events[-1].kind, "chair.final")
+            self.assertIn("down", result.abstentions)
+            self.assertIn("provider unavailable", result.abstentions["down"])
+            abstained = [event for event in result.events if event.kind == "agent.abstention"]
+            self.assertEqual([event.author for event in abstained], ["down"])
+            summaries = [event.author for event in result.events if event.kind == "agent.summary"]
+            self.assertEqual(sorted(summaries), ["chair", "peer"])
+            reviews = [event.author for event in result.events if event.kind == "agent.review"]
+            self.assertEqual(reviews, ["peer"])
+            log = Path(result.audit_path).read_text(encoding="utf-8")
+            self.assertIn("agent.abstained", log)
+            valid, message = AuditLog.verify(result.audit_path)
+            self.assertTrue(valid, message)
+
+            # The chair must be told an agent is missing, or silence reads as assent.
+            chair_provider = agents[0].provider
+            draft_prompt = next(
+                prompt for _, prompt in chair_provider.calls if prompt.startswith("CHAIR DRAFT")
+            )
+            final_prompt_text = next(
+                prompt for _, prompt in chair_provider.calls if prompt.startswith("FINAL RESULT")
+            )
+            for prompt in (draft_prompt, final_prompt_text):
+                self.assertIn("AGENTS THAT DID NOT REPORT", prompt)
+                self.assertIn("down: RuntimeError: provider unavailable", prompt)
+            self.assertIn("never as agreement", draft_prompt)
+
+    def test_chair_failure_is_fatal_even_when_peers_report(self) -> None:
+        class FailingChair(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                raise RuntimeError("chair offline")
+
+        agents = (
+            runtime("chair", FailingChair("chair")),
+            runtime("peer-a", ScriptedProvider("peer-a")),
+            runtime("peer-b", ScriptedProvider("peer-b")),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            orchestrator = SidechainOrchestrator(
+                agents, "chair", min_agent_quorum=2, audit_directory=Path(directory)
+            )
+            with self.assertRaisesRegex(RuntimeError, "cannot continue without its chair"):
+                orchestrator.run("claim")
+
+    def test_quorum_failure_names_the_underlying_errors(self) -> None:
+        class FailingProvider(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                raise RuntimeError("definitive failure")
+
+        agents = (
+            runtime("chair", ScriptedProvider("chair")),
+            runtime("down-one", FailingProvider("down-one")),
+            runtime("down-two", FailingProvider("down-two")),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            orchestrator = SidechainOrchestrator(
+                agents, "chair", min_agent_quorum=3, audit_directory=Path(directory)
+            )
+            with self.assertRaisesRegex(RuntimeError, "definitive failure"):
+                orchestrator.run("claim")
+
+    def test_oversized_public_brief_is_cut_and_the_full_text_kept_privately(self) -> None:
+        class VerboseProvider(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                reply = super().generate(system, prompt)
+                if prompt.startswith("Create the public brief"):
+                    body = "\n".join(f"CLAIM line {index} padding" for index in range(200))
+                    return ModelReply(reply.provider, reply.model, body)
+                return reply
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = SidechainOrchestrator(
+                (runtime("chair", VerboseProvider("chair")), runtime("peer", VerboseProvider("peer"))),
+                chair_id="chair",
+                max_clarification_questions=0,
+                max_public_brief_chars=400,
+                audit_directory=Path(directory),
+            ).run("claim")
+
+            published = [event for event in result.events if event.kind == "agent.summary"]
+            self.assertTrue(published)
+            for event in published:
+                self.assertLessEqual(len(event.content), 400)
+                self.assertIn("truncated", event.content)
+            workspace = Path(result.workspace_root)
+            full = workspace / "revision-0/agents/peer/summary.full.md"
+            self.assertTrue(full.is_file())
+            self.assertGreater(len(full.read_text(encoding="utf-8")), 400)
+            self.assertIn("workspace.brief_truncated", Path(result.audit_path).read_text(encoding="utf-8"))
+
+    def test_corrections_are_refused_past_the_revision_limit(self) -> None:
+        release = threading.Event()
+        reached = threading.Event()
+
+        class BlockingProvider(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                if prompt.startswith("CHAIR DRAFT"):
+                    reached.set()
+                    release.wait(timeout=5)
+                return super().generate(system, prompt)
+
+        with tempfile.TemporaryDirectory() as directory:
+            orchestrator = SidechainOrchestrator(
+                (runtime("chair", BlockingProvider("chair")), runtime("peer", ScriptedProvider("peer"))),
+                chair_id="chair",
+                max_clarification_questions=0,
+                max_revisions=0,
+                audit_directory=Path(directory),
+            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(orchestrator.run, "original task")
+                self.assertTrue(reached.wait(timeout=5))
+                with self.assertRaisesRegex(RuntimeError, "revision limit reached"):
+                    orchestrator.inject_user_message("late correction")
+                release.set()
+                result = future.result(timeout=10)
+
+            self.assertEqual(result.events[-1].kind, "chair.final")
+            self.assertFalse(any(event.kind == "user.steering" for event in result.events))
+
+    def test_corrections_are_refused_when_the_budget_cannot_fund_a_restart(self) -> None:
+        release = threading.Event()
+        reached = threading.Event()
+
+        class BlockingProvider(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                if prompt.startswith("CHAIR DRAFT"):
+                    reached.set()
+                    release.wait(timeout=5)
+                return super().generate(system, prompt)
+
+        with tempfile.TemporaryDirectory() as directory:
+            # Exactly one cycle is affordable, so a restart never is.
+            orchestrator = SidechainOrchestrator(
+                (runtime("chair", BlockingProvider("chair")), runtime("peer", ScriptedProvider("peer"))),
+                chair_id="chair",
+                max_clarification_questions=0,
+                max_model_calls=8,
+                audit_directory=Path(directory),
+            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(orchestrator.run, "original task")
+                self.assertTrue(reached.wait(timeout=5))
+                with self.assertRaisesRegex(RuntimeError, "model calls remain"):
+                    orchestrator.inject_user_message("late correction")
+                release.set()
+                result = future.result(timeout=10)
+
+            self.assertEqual(result.events[-1].kind, "chair.final")
+
+    def test_corrections_are_refused_after_the_session_deadline(self) -> None:
+        release = threading.Event()
+        reached = threading.Event()
+
+        class BlockingProvider(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                if prompt.startswith("CHAIR DRAFT"):
+                    reached.set()
+                    release.wait(timeout=5)
+                return super().generate(system, prompt)
+
+        with tempfile.TemporaryDirectory() as directory:
+            orchestrator = SidechainOrchestrator(
+                (runtime("chair", BlockingProvider("chair")), runtime("peer", ScriptedProvider("peer"))),
+                chair_id="chair",
+                max_clarification_questions=0,
+                session_deadline_seconds=3600,
+                audit_directory=Path(directory),
+            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(orchestrator.run, "original task")
+                self.assertTrue(reached.wait(timeout=5))
+                orchestrator._deadline = time.monotonic() - 1  # the deadline has passed
+                with self.assertRaisesRegex(RuntimeError, "deadline passed"):
+                    orchestrator.inject_user_message("late correction")
+                release.set()
+                result = future.result(timeout=10)
+
+            # The running cycle still finishes, so the session yields a result.
+            self.assertEqual(result.events[-1].kind, "chair.final")
 
     def test_failed_provider_closes_session_with_valid_audit(self) -> None:
         class FailingProvider(ScriptedProvider):
