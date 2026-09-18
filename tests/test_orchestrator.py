@@ -185,6 +185,94 @@ class OrchestratorTests(unittest.TestCase):
             self.assertNotIn("new fact before the verdict", final_prompts[0])
             self.assertIn("new fact before the verdict", final_prompts[1])
 
+    def test_chair_prose_around_json_does_not_abort_the_session(self) -> None:
+        class ChattyChair(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                reply = super().generate(system, prompt)
+                if "Return JSON only:" in prompt:
+                    text = (
+                        "Sure, here is my triage.\n```json\n"
+                        '{"questions": [{"agent_id": "peer", "question": "Which artifact?"}]}'
+                        "\n```\nLet me know if that helps."
+                    )
+                    return ModelReply(reply.provider, reply.model, text)
+                return reply
+
+        chair = ChattyChair("chair")
+        peer = ScriptedProvider("peer")
+        with tempfile.TemporaryDirectory() as directory:
+            result = SidechainOrchestrator(
+                (runtime("chair", chair), runtime("peer", peer)),
+                chair_id="chair",
+                audit_directory=Path(directory),
+            ).run("claim")
+
+            clarifications = [event for event in result.events if event.kind == "agent.clarification"]
+            self.assertEqual([event.author for event in clarifications], ["peer"])
+            self.assertEqual(result.events[-1].kind, "chair.final")
+
+    def test_unusable_chair_triage_degrades_and_is_recorded(self) -> None:
+        class BrokenChair(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                reply = super().generate(system, prompt)
+                if "Return JSON only:" in prompt:
+                    return ModelReply(reply.provider, reply.model, "I decline to answer in JSON.")
+                return reply
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = SidechainOrchestrator(
+                (runtime("chair", BrokenChair("chair")), runtime("peer", ScriptedProvider("peer"))),
+                chair_id="chair",
+                audit_directory=Path(directory),
+            ).run("claim")
+
+            self.assertEqual(result.events[-1].kind, "chair.final")
+            self.assertFalse([event for event in result.events if event.kind == "agent.clarification"])
+            log = Path(result.audit_path).read_text(encoding="utf-8")
+            self.assertIn("chair.triage_repaired", log)
+            valid, message = AuditLog.verify(result.audit_path)
+            self.assertTrue(valid, message)
+
+    def test_every_call_carries_shared_rules_and_the_agent_role(self) -> None:
+        peer = ScriptedProvider("peer")
+        with tempfile.TemporaryDirectory() as directory:
+            SidechainOrchestrator(
+                (runtime("chair", ScriptedProvider("chair")), runtime("peer", peer)),
+                chair_id="chair",
+                max_clarification_questions=0,
+                audit_directory=Path(directory),
+            ).run("claim")
+
+        systems = {system for system, _ in peer.calls}
+        self.assertTrue(systems)
+        for system in systems:
+            self.assertIn("Agreement is never proof", system)
+            self.assertIn("role-peer", system)
+
+    def test_token_usage_is_aggregated_for_the_session(self) -> None:
+        class MeteredProvider(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                reply = super().generate(system, prompt)
+                return ModelReply(
+                    reply.provider,
+                    reply.model,
+                    reply.text,
+                    usage={"input_tokens": 10, "output_tokens": 2, "model": "ignored"},
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = SidechainOrchestrator(
+                (runtime("chair", MeteredProvider("chair")), runtime("peer", MeteredProvider("peer"))),
+                chair_id="chair",
+                max_clarification_questions=0,
+                audit_directory=Path(directory),
+            ).run("claim")
+
+            # 2 per agent + chair triage + draft + one review + final
+            self.assertEqual(result.model_calls, 8)
+            self.assertEqual(result.usage_totals, {"input_tokens": 80, "output_tokens": 16})
+            self.assertIn("usage_totals", Path(result.audit_path).read_text(encoding="utf-8"))
+
     def test_one_failing_agent_abstains_and_the_room_still_decides(self) -> None:
         class FailingProvider(ScriptedProvider):
             def generate(self, system: str, prompt: str) -> ModelReply:

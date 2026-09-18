@@ -19,6 +19,7 @@ from x_sidechain.prompts import (
     private_analysis_prompt,
     public_summary_prompt,
     review_prompt,
+    system_prompt,
 )
 from x_sidechain.providers.base import Provider
 from x_sidechain.workspace import SessionWorkspace, validate_agent_id
@@ -43,6 +44,56 @@ class AgentBrief:
 class ChairQuestion:
     agent_id: str
     question: str
+
+
+@dataclass(frozen=True)
+class ParsedQuestions:
+    """Best-effort chair triage: malformed items are dropped, never fatal."""
+
+    questions: tuple[ChairQuestion, ...]
+    notes: tuple[str, ...]
+
+
+def _json_objects(text: str) -> list[object]:
+    """Every balanced top-level JSON object in text, ignoring prose and code fences."""
+    found: list[object] = []
+    depth = 0
+    start = -1
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                try:
+                    found.append(json.loads(text[start : index + 1]))
+                except json.JSONDecodeError:
+                    pass
+                start = -1
+    return found
+
+
+def _questions_object(text: str) -> dict | None:
+    """Prefer the object that actually carries the chair's questions array."""
+    objects = [item for item in _json_objects(text) if isinstance(item, dict)]
+    for item in objects:
+        if "questions" in item:
+            return item
+    return objects[0] if objects else None
 
 
 class RevisionChanged(RuntimeError):
@@ -134,6 +185,7 @@ class SidechainOrchestrator:
         self._steering: list[str] = []
         self._audit: AuditLog | None = None
         self._model_calls = 0
+        self._usage: dict[str, int] = {}
         self._deadline: float | None = None
         self._abstentions: dict[str, str] = {}
 
@@ -237,9 +289,17 @@ class SidechainOrchestrator:
                 )
             self._model_calls += 1
 
+    def _record_usage(self, reply: ModelReply) -> None:
+        with self._condition:
+            for key, value in reply.usage.items():
+                if isinstance(value, int) and not isinstance(value, bool):
+                    self._usage[key] = self._usage.get(key, 0) + value
+
     def _generate(self, runtime: AgentRuntime, prompt: str) -> ModelReply:
         self._reserve_model_call()
-        return runtime.provider.generate(runtime.spec.role, prompt)
+        reply = runtime.provider.generate(system_prompt(runtime.spec.role), prompt)
+        self._record_usage(reply)
+        return reply
 
     def _settle(
         self,
@@ -328,36 +388,42 @@ class SidechainOrchestrator:
         return published
 
     @staticmethod
-    def _parse_questions(text: str, valid_ids: set[str], limit: int) -> tuple[ChairQuestion, ...]:
-        candidate = text.strip()
-        if candidate.startswith("```"):
-            lines = candidate.splitlines()
-            candidate = "\n".join(lines[1:-1]).strip()
-            if candidate.startswith("json"):
-                candidate = candidate[4:].lstrip()
-        try:
-            raw = json.loads(candidate)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("chair returned invalid clarification JSON") from exc
-        questions = raw.get("questions") if isinstance(raw, dict) else None
+    def _parse_questions(text: str, valid_ids: set[str], limit: int) -> ParsedQuestions:
+        """Read chair triage output without letting a formatting slip end the session.
+
+        The briefs are already paid for at this point, so unusable triage degrades to
+        "no clarification needed" and is recorded, instead of aborting the run.
+        """
+        notes: list[str] = []
+        raw = _questions_object(text)
+        if raw is None:
+            return ParsedQuestions((), ("chair returned no parsable JSON object",))
+        questions = raw.get("questions", [])
         if not isinstance(questions, list):
-            raise RuntimeError("chair clarification output must contain a questions array")
+            return ParsedQuestions((), ("chair output has no questions array",))
         parsed: list[ChairQuestion] = []
         seen: set[str] = set()
         for item in questions:
             if not isinstance(item, dict):
-                raise RuntimeError("every chair question must be an object")
+                notes.append("dropped a non-object question entry")
+                continue
             agent_id = item.get("agent_id")
             question = item.get("question")
-            if agent_id not in valid_ids or not isinstance(question, str) or not question.strip():
-                raise RuntimeError("chair question has an invalid agent id or empty question")
+            if agent_id not in valid_ids:
+                notes.append(f"dropped a question for an unknown agent: {agent_id!r}")
+                continue
+            if not isinstance(question, str) or not question.strip():
+                notes.append(f"dropped an empty question for {agent_id}")
+                continue
             if agent_id in seen:
-                raise RuntimeError("chair may ask at most one question per agent")
-            seen.add(agent_id)
-            parsed.append(ChairQuestion(agent_id, question.strip()))
+                notes.append(f"dropped a duplicate question for {agent_id}")
+                continue
+            seen.add(str(agent_id))
+            parsed.append(ChairQuestion(str(agent_id), question.strip()))
         if len(parsed) > limit:
-            raise RuntimeError(f"chair exceeded the clarification limit of {limit}")
-        return tuple(parsed)
+            notes.append(f"truncated {len(parsed)} questions to the limit of {limit}")
+            parsed = parsed[:limit]
+        return ParsedQuestions(tuple(parsed), tuple(notes))
 
     def _run_cycle(
         self,
@@ -451,11 +517,18 @@ class SidechainOrchestrator:
         )
         workspace.write(revision, self.chair_id, "chair/questions.json", question_reply.text)
         self._ensure_revision(revision, "chair_questions")
-        questions = self._parse_questions(
+        triage = self._parse_questions(
             question_reply.text,
             set(summaries),
             self.max_clarification_questions,
         )
+        questions = triage.questions
+        if triage.notes:
+            self.progress(f"Revision {revision}: chair triage repaired ({'; '.join(triage.notes)})")
+            audit.append(
+                "chair.triage_repaired",
+                {"revision": revision, "chair_id": self.chair_id, "notes": list(triage.notes)},
+            )
         self._publish_batch(
             revision,
             "chair.question",
@@ -583,6 +656,7 @@ class SidechainOrchestrator:
             self._steering = []
             self._events = []
             self._model_calls = 0
+            self._usage = {}
             self._abstentions = {}
             self._deadline = (
                 time.monotonic() + self.session_deadline_seconds
@@ -657,6 +731,8 @@ class SidechainOrchestrator:
                     "session_id": session_id,
                     "status": "completed",
                     "model_calls": self._model_calls,
+                    "max_model_calls": self.max_model_calls,
+                    "usage_totals": dict(self._usage),
                     "revisions": revision,
                     "abstentions": dict(self._abstentions),
                 },
@@ -664,7 +740,13 @@ class SidechainOrchestrator:
         except Exception as exc:
             audit.append(
                 "session.failed",
-                {"session_id": session_id, "error_type": type(exc).__name__, "error": str(exc)},
+                {
+                    "session_id": session_id,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "model_calls": self._model_calls,
+                    "usage_totals": dict(self._usage),
+                },
             )
             raise
         finally:
@@ -685,5 +767,7 @@ class SidechainOrchestrator:
             synthesis=synthesis,
             audit_path=str(audit.path),
             workspace_root=str(workspace.root),
+            model_calls=self._model_calls,
+            usage_totals=dict(self._usage),
             abstentions=dict(self._abstentions),
         )

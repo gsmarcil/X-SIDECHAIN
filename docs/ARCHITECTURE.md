@@ -13,7 +13,11 @@ For `N` agents and one configured chair:
    evidence, uncertainty, fastest test, and stop condition.
 3. **Chair triage** — the chair reads all public briefs and returns zero or more
    targeted questions. Each question names exactly one agent; there is at most one
-   question per agent and a configured total limit.
+   question per agent and a configured total limit. Triage output is parsed
+   tolerantly: JSON is recovered from surrounding prose or code fences, invalid or
+   excess entries are dropped and recorded as `chair.triage_repaired`, and output
+   that cannot be read at all degrades to "no clarification needed" instead of
+   discarding briefs the session has already paid for.
 4. **Targeted clarification** — only named agents receive their question, their own
    private note, and their own public brief.
 5. **Chair draft** — the chair creates a provisional decision from public briefs and
@@ -77,7 +81,9 @@ The maximum calls in one full cycle are:
 where `Q` is `max_clarification_questions`. This includes two calls per agent for
 private analysis and summary, chair triage and draft, up to `Q` clarifications,
 `N - 1` peer reviews, and the final chair call. User revisions can restart a cycle,
-so `max_model_calls` is a hard admission budget across the whole session.
+so `max_model_calls` is a hard admission budget across the whole session. Transport-level
+retries are not model calls and are not charged against it. Provider-reported token
+usage is summed across the session and returned with the result.
 
 ## Module boundaries
 
@@ -86,6 +92,8 @@ so `max_model_calls` is a hard admission budget across the whole session.
 - `auth.py`: API credentials and official OAuth Device Flow.
 - `providers/`: wire-protocol adapters.
 - `orchestrator.py`: phase machine, targeted routing, revisions, and call budget.
-- `prompts.py`: per-phase information boundaries.
+- `prompts.py`: per-phase information boundaries and the shared evidence rules that
+  precede each agent's configured role in every system prompt.
+- `http.py`: JSON transport with bounded responses and backoff on 429/5xx.
 - `audit.py`: SHA-256 chained session records.
 - `__main__.py`: CLI, interactive user updates, and audit verification.

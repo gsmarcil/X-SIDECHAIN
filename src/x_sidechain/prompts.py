@@ -8,6 +8,11 @@ Produce auditable work products, not hidden chain-of-thought. Separate observati
 claims, uncertainty, and decisive tests. Agreement is never proof."""
 
 
+def system_prompt(role: str) -> str:
+    """Every call carries the shared evidence rules plus the agent's own role."""
+    return f"{DEFAULT_ROLE}\n\nYOUR ROLE IN THIS TEAM\n{role.strip()}"
+
+
 def _task_context(task: str, steering: Sequence[str]) -> str:
     updates = "\n".join(f"- {item}" for item in steering) if steering else "- NONE"
     return f"ORIGINAL TASK\n{task}\n\nUSER UPDATES\n{updates}"

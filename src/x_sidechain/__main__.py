@@ -125,8 +125,8 @@ def _interactive_run(orchestrator: SidechainOrchestrator, task: str) -> Discussi
             try:
                 orchestrator.inject_user_message(message)
             except (RuntimeError, ValueError) as exc:
-                # A refused correction (revision cap, deadline, remaining budget) must
-                # never discard a session the run already paid for.
+                # A late keystroke or a refused correction (revision cap, deadline,
+                # remaining budget) must never discard a session already paid for.
                 print(f"[x-sidechain] correction refused: {exc}", flush=True)
                 accepting = isinstance(exc, ValueError)
         return future.result()
@@ -182,6 +182,8 @@ def main() -> int:
                         "session_id": result.session_id,
                         "audit_path": result.audit_path,
                         "workspace_root": result.workspace_root,
+                        "model_calls": result.model_calls,
+                        "usage_totals": result.usage_totals,
                         "abstentions": result.abstentions,
                     },
                     indent=2,
@@ -189,6 +191,9 @@ def main() -> int:
             )
             print("\n" + result.synthesis.text)
             return 0
+    except KeyboardInterrupt:
+        print("\nERROR: interrupted; in-flight provider calls may still be billed")
+        return 130
     except (RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}")
         return 2
