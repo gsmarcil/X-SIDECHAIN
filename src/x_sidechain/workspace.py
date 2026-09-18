@@ -14,13 +14,24 @@ def validate_agent_id(agent_id: str) -> None:
         )
 
 
+def restrict(path: Path, mode: int) -> None:
+    """Tighten local permissions, tolerating filesystems that do not support it."""
+    try:
+        path.chmod(mode)
+    except OSError:
+        pass
+
+
 class SessionWorkspace:
     """File-backed per-agent workspaces with private local permissions."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.root.chmod(0o700)
+        # mkdir(mode=...) applies to the leaf only, so tighten the session directory
+        # that parents=True created with the process umask.
+        restrict(self.root.parent, 0o700)
+        restrict(self.root, 0o700)
 
     def write(self, revision: int, agent_id: str, relative_path: str, content: str) -> Path:
         validate_agent_id(agent_id)
@@ -31,9 +42,11 @@ class SessionWorkspace:
         agents_root = revision_root / "agents"
         agent_root = agents_root / agent_id
         target = agent_root / relative
+        if target.is_symlink() or target.parent.is_symlink():
+            raise ValueError("workspace path must not traverse a symlink")
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         for directory in (revision_root, agents_root, agent_root, target.parent):
-            directory.chmod(0o700)
+            restrict(directory, 0o700)
         target.write_text(content.rstrip() + "\n", encoding="utf-8")
-        target.chmod(0o600)
+        restrict(target, 0o600)
         return target
