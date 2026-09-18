@@ -1,29 +1,33 @@
 # X-SIDECHAIN
 
-X-SIDECHAIN is a provider-agnostic, multi-agent deliberation engine for Linux.
-One prompt is broadcast to every configured agent, the agents reason independently,
-then optionally review every peer before one selected agent produces the joint result.
+X-SIDECHAIN is a provider-agnostic live discussion room for AI agents on Linux.
+Agents do not disappear into separate long answers and compare them afterward.
+They publish short proposals, corrections, challenges, and evidence requests into
+one shared event stream while the discussion is running.
 
 The core is alpha software. Model output remains untrusted, and agreement between
 models is never treated as proof. A graphical interface is intentionally deferred
-until the configuration, authentication, and deliberation contracts are stable.
+until the live-room, authentication, and provider contracts are stable.
 
-## What v0.2 supports
+## What v0.3 supports
 
 - Any number of agents from two upward; there is no two-agent or three-agent cap.
 - Arbitrary model identifiers and configurable providers.
+- A live shared room whose accepted events are immediately visible to every agent.
+- User corrections and additions while agents or the final synthesizer are working.
+- Provider-neutral mid-run steering: a draft based on an old room version is audited,
+  rejected, and regenerated against the new state before it can be published.
+- Fair contribution quotas, a configurable model-call budget, and a selected final
+  synthesizer.
 - OpenAI Responses-compatible, Chat Completions-compatible, and Anthropic
   Messages-compatible endpoints.
 - API-key authentication, no-auth local endpoints, and standards-based OAuth 2.0
   Device Authorization Grant when the provider officially exposes it.
-- A synchronized first round: the exact same generated user prompt is released to
-  every selected agent only after all workers are ready.
-- Parallel all-peer cross-review and a configurable final synthesizer.
 - Tamper-evident local JSONL audit trails and offline verification.
 
-Provider compatibility depends on an official API matching one of the implemented
-protocol adapters. A provider-specific adapter can be added without changing the
-orchestrator.
+The room exchanges concise public reasoning summaries. It neither requests nor
+claims access to a model's hidden chain-of-thought. Native provider steering can be
+added as a capability optimization; stale-draft rejection is the universal fallback.
 
 ## Install from source
 
@@ -41,7 +45,7 @@ cp x-sidechain.example.json x-sidechain.json
 Edit `x-sidechain.json`: add providers, then add as many agents as needed. The
 `model` value is not selected from a hard-coded list.
 
-Export the credentials referenced by your configuration. For the included example:
+Export only the credentials referenced by the selected agents. For example:
 
 ```bash
 export OPENAI_API_KEY='...'
@@ -49,9 +53,6 @@ export ANTHROPIC_API_KEY='...'
 export XAI_API_KEY='...'
 export OPENROUTER_API_KEY='...'
 ```
-
-Only agents listed under `agents` are called, so unused example providers do not
-require credentials.
 
 ## Validate and run
 
@@ -61,14 +62,20 @@ x-sidechain providers --config x-sidechain.json
 x-sidechain run --config x-sidechain.json --prompt 'Analyze this claim and identify the decisive evidence.'
 ```
 
-A long prompt can be read from a UTF-8 file instead:
+To join the discussion while it is running:
 
 ```bash
-x-sidechain run --config x-sidechain.json --prompt-file task.md
+x-sidechain run --interactive --config x-sidechain.json --prompt 'Test the original hypothesis.'
 ```
 
-The final answer is printed to the terminal. Session metadata and every model
-artifact are recorded in the audit path printed by the command.
+Type any correction or additional idea and press Enter. It becomes a `user.steering`
+event immediately. In-flight drafts based on the previous room state cannot be
+accepted. Type `/finish` to stop requesting more agent contributions and synthesize
+from the accepted room state.
+
+A long initial prompt can be read from a UTF-8 file using `--prompt-file task.md`.
+The final answer is printed to the terminal, and every accepted or superseded
+artifact is recorded in the audit path printed by the command.
 
 ## Authentication modes
 
@@ -92,8 +99,6 @@ Service through `secret-tool`, never in the JSON configuration.
 x-sidechain verify ~/.local/share/x-sidechain/sessions/SESSION_ID.jsonl
 ```
 
-A successful verification prints the event count and final chain hash.
-
 ## Development
 
 ```bash
@@ -105,7 +110,7 @@ See [Architecture](docs/ARCHITECTURE.md),
 
 ## Roadmap
 
-- Stabilize provider, authentication, and run-result interfaces.
-- Add streaming, cancellation, provider concurrency limits, and retry policy.
-- Build the Linux UI only after the core interfaces become stable.
+- Add native WebSocket mid-turn steering adapters where providers support it.
+- Add streaming, request cancellation, retry policy, and context compaction.
+- Build the Linux UI only after the live-room interfaces become stable.
 - Add signed audit exports, evidence attachments, `.deb`, and AppImage artifacts.

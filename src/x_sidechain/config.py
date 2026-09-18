@@ -42,7 +42,8 @@ class RunConfig:
     agents: tuple[AgentSpec, ...]
     synthesizer: str
     request_timeout_seconds: int = 600
-    cross_review: bool = True
+    contributions_per_agent: int = 2
+    max_model_calls: int | None = None
 
 
 def _required_string(raw: dict[str, Any], key: str, context: str) -> str:
@@ -183,13 +184,25 @@ def load_config(path: str | Path) -> RunConfig:
     timeout = timeout_raw
     if timeout < 1 or timeout > 3600:
         raise ValueError("request_timeout_seconds must be between 1 and 3600")
-    cross_review = raw.get("cross_review", True)
-    if not isinstance(cross_review, bool):
-        raise ValueError("cross_review must be a boolean")
+    contributions_raw = raw.get("contributions_per_agent", 2)
+    if not isinstance(contributions_raw, int) or isinstance(contributions_raw, bool):
+        raise ValueError("contributions_per_agent must be an integer")
+    if contributions_raw < 1 or contributions_raw > 20:
+        raise ValueError("contributions_per_agent must be between 1 and 20")
+    max_calls_raw = raw.get("max_model_calls")
+    if max_calls_raw is not None:
+        if not isinstance(max_calls_raw, int) or isinstance(max_calls_raw, bool):
+            raise ValueError("max_model_calls must be an integer")
+        minimum_calls = contributions_raw * len(agents) * (len(agents) + 1) // 2 + 1
+        if max_calls_raw < minimum_calls:
+            raise ValueError(
+                f"max_model_calls must be at least {minimum_calls} for this configuration"
+            )
     return RunConfig(
         providers=providers,
         agents=tuple(agents),
         synthesizer=synthesizer,
         request_timeout_seconds=timeout,
-        cross_review=cross_review,
+        contributions_per_agent=contributions_raw,
+        max_model_calls=max_calls_raw,
     )

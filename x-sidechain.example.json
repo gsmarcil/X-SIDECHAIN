@@ -74,6 +74,7 @@
     }
   ],
   "synthesizer": "validator",
-  "cross_review": true,
+  "contributions_per_agent": 2,
+  "max_model_calls": 41,
   "request_timeout_seconds": 600
 }

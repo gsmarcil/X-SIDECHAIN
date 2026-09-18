@@ -26,13 +26,24 @@ class ModelReply:
 
 
 @dataclass(frozen=True)
-class DebateResult:
+class DiscussionEvent:
+    sequence: int
+    kind: str
+    author: str
+    content: str
+    based_on_sequence: int | None
+    reply: ModelReply | None = None
+
+    def public_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class DiscussionResult:
     session_id: str
     prompt: str
     agents: tuple[AgentSpec, ...]
-    initial: dict[str, ModelReply]
-    critiques: dict[str, ModelReply]
+    events: tuple[DiscussionEvent, ...]
     synthesizer_id: str
     synthesis: ModelReply
     audit_path: str
-

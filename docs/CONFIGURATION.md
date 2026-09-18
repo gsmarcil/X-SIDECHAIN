@@ -1,9 +1,9 @@
 # Configuration
 
-Configuration is JSON with `version: 1`. It has two independent layers:
+Configuration is JSON with `version: 1`:
 
 - `providers` describe API protocol, endpoint, and authentication.
-- `agents` select any provider/model pair and give that agent a role.
+- `agents` select any provider/model pair and give that participant a role.
 
 There is no model catalog or fixed agent count. At least two agents and one valid
 `synthesizer` agent ID are required.
@@ -16,9 +16,8 @@ There is no model catalog or fixed agent count. At least two agents and one vali
 | `chat_completions` | `/chat/completions` | OpenAI-compatible chat APIs and local servers |
 | `anthropic_messages` | `/messages` | Anthropic Messages-compatible APIs |
 
-Model names are passed unchanged to the endpoint. Compatibility means API protocol
-compatibility, not merely that a service calls itself “OpenAI compatible.” Validate
-a new endpoint with a non-sensitive prompt before using real data.
+Model names are passed unchanged. Compatibility means wire-protocol compatibility,
+not merely that a service calls itself “OpenAI compatible.”
 
 ## API key provider
 
@@ -70,23 +69,26 @@ your application:
 }
 ```
 
-Then run `x-sidechain auth login PROVIDER_ID --config x-sidechain.json`. An optional
-`token_env` can supply a short-lived token without writing it to configuration.
+Then run `x-sidechain auth login PROVIDER_ID --config x-sidechain.json`.
 
-## Agents
+## Agents and live-room limits
 
 ```json
 {
   "agents": [
-    {"id": "a", "provider": "provider-one", "model": "any-model-id", "role": "Independent analyst"},
-    {"id": "b", "provider": "provider-two", "model": "another-model-id", "role": "Adversarial reviewer"},
+    {"id": "a", "provider": "provider-one", "model": "any-model-id", "role": "Attack-surface explorer"},
+    {"id": "b", "provider": "provider-two", "model": "another-model-id", "role": "Claim validator"},
     {"id": "c", "provider": "local", "model": "local-model", "role": "Evidence checker"}
   ],
   "synthesizer": "b",
-  "cross_review": true,
+  "contributions_per_agent": 2,
+  "max_model_calls": 28,
   "request_timeout_seconds": 600
 }
 ```
 
-The same provider and model may be used by multiple agents with different roles.
-Agent IDs must be unique.
+`contributions_per_agent` is between 1 and 20. `max_model_calls` is the hard session
+budget, including superseded drafts and synthesis. Its minimum is
+`C × N × (N + 1) / 2 + 1`; omitting it selects that minimum plus capacity for five
+full-room steering invalidations. The same provider/model may back multiple agents,
+but agent IDs must be unique.

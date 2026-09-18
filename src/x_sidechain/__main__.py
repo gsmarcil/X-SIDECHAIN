@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import select
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from x_sidechain.audit import AuditLog
 from x_sidechain.auth import oauth_device_login
 from x_sidechain.config import RunConfig, load_config
+from x_sidechain.models import DiscussionEvent, DiscussionResult
 from x_sidechain.orchestrator import AgentRuntime, SidechainOrchestrator
 from x_sidechain.providers import create_provider
 
@@ -23,6 +28,11 @@ def _parser() -> argparse.ArgumentParser:
     prompt = run.add_mutually_exclusive_group(required=True)
     prompt.add_argument("--prompt")
     prompt.add_argument("--prompt-file", metavar="FILE")
+    run.add_argument(
+        "--interactive",
+        action="store_true",
+        help="accept steering lines from stdin while agents are discussing",
+    )
 
     validate = subcommands.add_parser("validate-config", help="validate configuration without API calls")
     validate.add_argument("--config", required=True, metavar="FILE.json")
@@ -64,6 +74,41 @@ def _task(args: argparse.Namespace) -> str:
         raise ValueError(f"cannot read prompt file: {exc}") from exc
 
 
+def _show_event(event: DiscussionEvent) -> None:
+    print(f"\n[{event.sequence} · {event.author} · {event.kind}]\n{event.content}", flush=True)
+
+
+def _interactive_run(orchestrator: SidechainOrchestrator, task: str) -> DiscussionResult:
+    if not sys.stdin.isatty():
+        raise ValueError("--interactive requires a terminal on stdin")
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="xsidechain-session") as pool:
+        future = pool.submit(orchestrator.run, task)
+        if not orchestrator.wait_until_active(timeout=10):
+            return future.result()
+        print(
+            "[x-sidechain] Live input enabled. Type a correction or addition and press Enter. "
+            "Use /finish to synthesize now.",
+            flush=True,
+        )
+        while not future.done():
+            readable, _, _ = select.select([sys.stdin], [], [], 0.2)
+            if not readable:
+                continue
+            line = sys.stdin.readline()
+            if not line:
+                while not future.done():
+                    time.sleep(0.1)
+                break
+            message = line.strip()
+            if not message:
+                continue
+            if message == "/finish":
+                orchestrator.request_finish()
+                continue
+            orchestrator.inject_user_message(message)
+        return future.result()
+
+
 def main() -> int:
     args = _parser().parse_args()
     if args.command == "verify":
@@ -89,12 +134,20 @@ def main() -> int:
             print(oauth_device_login(config.providers[args.provider]))
             return 0
         if args.command == "run":
-            result = SidechainOrchestrator(
+            orchestrator = SidechainOrchestrator(
                 agents=_runtimes(config),
                 synthesizer_id=config.synthesizer,
-                cross_review=config.cross_review,
+                contributions_per_agent=config.contributions_per_agent,
+                max_model_calls=config.max_model_calls,
                 progress=lambda message: print(f"[x-sidechain] {message}", flush=True),
-            ).run(_task(args))
+                on_event=_show_event,
+            )
+            task = _task(args)
+            result = (
+                _interactive_run(orchestrator, task)
+                if args.interactive
+                else orchestrator.run(task)
+            )
             print(json.dumps({"session_id": result.session_id, "audit_path": result.audit_path}, indent=2))
             print("\n" + result.synthesis.text)
             return 0
@@ -106,4 +159,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

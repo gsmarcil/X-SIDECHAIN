@@ -1,59 +1,58 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Sequence
+
+from x_sidechain.models import DiscussionEvent
 
 
-DEFAULT_ROLE = """You are one member of an evidence-first deliberation team.
-Analyze independently before seeing peer work. Separate facts, observations, and inference.
-Never convert agreement into proof. Prefer a decisive observable test over speculation."""
+DEFAULT_ROLE = """You are one participant in a live evidence-first deliberation room.
+Publish concise reasoning summaries, hypotheses, challenges, and evidence requests.
+Do not reveal private chain-of-thought. Never convert agreement into proof."""
 
 
-def initial_prompt(task: str) -> str:
-    return f"""Analyze this task independently. Every selected agent receives this exact user prompt
-at the same stage. Do not assume or imitate another agent's answer.
-
-TASK
-{task}
-
-Return concrete reasoning, evidence requirements, and the fastest next action."""
+def _render_room(events: Sequence[DiscussionEvent]) -> str:
+    return "\n\n".join(
+        f"EVENT {event.sequence} | {event.kind} | {event.author}\n{event.content}"
+        for event in events
+    )
 
 
-def _render_answers(answers: Mapping[str, str], heading: str) -> str:
-    blocks = []
-    for agent_id, answer in answers.items():
-        blocks.append(f"{heading}: {agent_id}\n{'-' * (len(heading) + len(agent_id) + 2)}\n{answer}")
-    return "\n\n".join(blocks)
-
-
-def critique_prompt(task: str, peer_answers: Mapping[str, str]) -> str:
-    return f"""Cross-examine every peer answer against the original task. You are receiving all
-peer answers from the same independent round. Do not manufacture consensus.
+def contribution_prompt(
+    task: str,
+    events: Sequence[DiscussionEvent],
+    agent_id: str,
+) -> str:
+    return f"""You are {agent_id} in a live shared discussion. The room below is the complete
+public state at the instant you were invited. Respond to the newest useful idea now; do not
+write a standalone final answer and do not repeat the entire task. Another participant may
+add or correct information while you work, in which case this draft can be superseded.
 
 ORIGINAL TASK
 {task}
 
-{_render_answers(peer_answers, 'PEER')}
+LIVE ROOM
+{_render_room(events)}
 
-Identify unsupported claims, missed paths, contradictions, and the first decisive test.
-Preserve claims that are actually supported and name the peer they came from."""
+Publish exactly one compact contribution using these fields:
+TYPE: PROPOSAL | CORRECTION | CHALLENGE | EVIDENCE | QUESTION
+CLAIM: one atomic public claim
+BASIS: concise support, not hidden chain-of-thought
+TARGET: event number or NONE
+NEXT_ACTION: one observable next step
+
+Do not declare a final verdict. Keep the contribution under 1,200 characters."""
 
 
-def synthesis_prompt(
-    task: str,
-    initial: Mapping[str, str],
-    critiques: Mapping[str, str],
-) -> str:
-    critique_text = _render_answers(critiques, "CRITIQUE") if critiques else "CRITIQUE ROUND DISABLED"
-    return f"""Produce the joint decision for this multi-agent run. Agreement is not proof.
-Promote a claim to PROVEN only when the supplied material contains an observable artifact.
+def synthesis_prompt(task: str, events: Sequence[DiscussionEvent]) -> str:
+    return f"""Produce the joint decision from this live multi-agent discussion. Agreement is
+not proof. Promote a claim to PROVEN only when the room contains an observable artifact.
 Otherwise choose DISPROVEN or AMBIGUOUS. Preserve material disagreement explicitly.
 
 ORIGINAL TASK
 {task}
 
-{_render_answers(initial, 'INDEPENDENT ANSWER')}
-
-{critique_text}
+ACCEPTED LIVE EVENTS
+{_render_room(events)}
 
 Use exactly these sections:
 VERDICT
@@ -67,4 +66,3 @@ DISPUTED
 NEXT_DECISIVE_TEST
 EVIDENCE_REFERENCES
 """
-
