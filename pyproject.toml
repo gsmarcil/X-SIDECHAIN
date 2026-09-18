@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "x-sidechain"
-version = "0.1.0"
+version = "0.2.0"
 description = "Evidence-first multi-provider AI deliberation for Linux"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "gsmarcil" }]
 classifiers = [
   "Development Status :: 3 - Alpha",
-  "Environment :: X11 Applications",
+  "Environment :: Console",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
 ]
@@ -21,4 +21,3 @@ x-sidechain = "x_sidechain.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

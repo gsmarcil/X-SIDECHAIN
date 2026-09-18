@@ -6,7 +6,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class AgentSpec:
-    name: str
+    id: str
     provider: str
     model: str
     role: str
@@ -29,12 +29,10 @@ class ModelReply:
 class DebateResult:
     session_id: str
     prompt: str
-    agent_a: AgentSpec
-    agent_b: AgentSpec
-    initial_a: ModelReply
-    initial_b: ModelReply
-    critique_a: ModelReply
-    critique_b: ModelReply
+    agents: tuple[AgentSpec, ...]
+    initial: dict[str, ModelReply]
+    critiques: dict[str, ModelReply]
+    synthesizer_id: str
     synthesis: ModelReply
     audit_path: str
 

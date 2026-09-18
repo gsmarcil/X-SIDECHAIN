@@ -1,16 +1,16 @@
-EXPLORER_ROLE = """You are the Discovery agent in an evidence-first research pair.
-Expand the plausible solution and attack surface. Pursue unusual but technically grounded paths.
-Separate source facts, runtime observations, and inference. Never claim success without an
-observable artifact. Stay within the scope stated by the user."""
+from __future__ import annotations
 
-VALIDATOR_ROLE = """You are the Validation agent in an evidence-first research pair.
-Be brutally skeptical. Reduce the proposal to one exact claim, the attacker's exact capability,
-and one observable success artifact. Identify the fastest safe test that proves or kills it.
-Stop at the first definitive deny or allow artifact; label missing evidence as ambiguity."""
+from collections.abc import Mapping
+
+
+DEFAULT_ROLE = """You are one member of an evidence-first deliberation team.
+Analyze independently before seeing peer work. Separate facts, observations, and inference.
+Never convert agreement into proof. Prefer a decisive observable test over speculation."""
 
 
 def initial_prompt(task: str) -> str:
-    return f"""Analyze this task independently. Do not assume another agent's answer.
+    return f"""Analyze this task independently. Every selected agent receives this exact user prompt
+at the same stage. Do not assume or imitate another agent's answer.
 
 TASK
 {task}
@@ -18,47 +18,42 @@ TASK
 Return concrete reasoning, evidence requirements, and the fastest next action."""
 
 
-def critique_prompt(task: str, peer_name: str, peer_answer: str) -> str:
-    return f"""Review a peer agent's independent answer against the original task.
+def _render_answers(answers: Mapping[str, str], heading: str) -> str:
+    blocks = []
+    for agent_id, answer in answers.items():
+        blocks.append(f"{heading}: {agent_id}\n{'-' * (len(heading) + len(agent_id) + 2)}\n{answer}")
+    return "\n\n".join(blocks)
+
+
+def critique_prompt(task: str, peer_answers: Mapping[str, str]) -> str:
+    return f"""Cross-examine every peer answer against the original task. You are receiving all
+peer answers from the same independent round. Do not manufacture consensus.
 
 ORIGINAL TASK
 {task}
 
-PEER AGENT
-{peer_name}
-
-PEER ANSWER
-{peer_answer}
+{_render_answers(peer_answers, 'PEER')}
 
 Identify unsupported claims, missed paths, contradictions, and the first decisive test.
-Preserve strong claims that are actually supported. Do not manufacture agreement."""
+Preserve claims that are actually supported and name the peer they came from."""
 
 
 def synthesis_prompt(
     task: str,
-    initial_a: str,
-    initial_b: str,
-    critique_a: str,
-    critique_b: str,
+    initial: Mapping[str, str],
+    critiques: Mapping[str, str],
 ) -> str:
-    return f"""Produce the joint decision for two agents. Agreement is not proof. Promote a claim
-to PROVEN only when the supplied material contains an observable artifact. Otherwise choose
-DISPROVEN or AMBIGUOUS. Preserve material disagreement explicitly.
+    critique_text = _render_answers(critiques, "CRITIQUE") if critiques else "CRITIQUE ROUND DISABLED"
+    return f"""Produce the joint decision for this multi-agent run. Agreement is not proof.
+Promote a claim to PROVEN only when the supplied material contains an observable artifact.
+Otherwise choose DISPROVEN or AMBIGUOUS. Preserve material disagreement explicitly.
 
 ORIGINAL TASK
 {task}
 
-AGENT A — INITIAL
-{initial_a}
+{_render_answers(initial, 'INDEPENDENT ANSWER')}
 
-AGENT B — INITIAL
-{initial_b}
-
-AGENT A — CRITIQUE OF B
-{critique_a}
-
-AGENT B — CRITIQUE OF A
-{critique_b}
+{critique_text}
 
 Use exactly these sections:
 VERDICT

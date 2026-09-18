@@ -1,69 +1,195 @@
 from __future__ import annotations
 
 import json
-import os
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+
+from x_sidechain.models import AgentSpec
 
 
-PROVIDER_DEFAULTS = {
-    "openai": os.getenv("OPENAI_MODEL", "gpt-6-astra"),
-    "anthropic": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
-    "xai": os.getenv("XAI_MODEL", "grok-4.6"),
-}
-
-PROVIDER_KEY_ENV = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "xai": "XAI_API_KEY",
-}
+SUPPORTED_PROTOCOLS = {"responses", "chat_completions", "anthropic_messages"}
+SUPPORTED_AUTH = {"none", "api_key", "oauth_device"}
 
 
-@dataclass
-class AppConfig:
-    agent_a_provider: str = "openai"
-    agent_a_model: str = PROVIDER_DEFAULTS["openai"]
-    agent_b_provider: str = "anthropic"
-    agent_b_model: str = PROVIDER_DEFAULTS["anthropic"]
-    synthesizer: str = "a"
+@dataclass(frozen=True)
+class AuthConfig:
+    type: str
+    env: str | None = None
+    header: str = "Authorization"
+    scheme: str = "Bearer"
+    device_authorization_url: str | None = None
+    token_url: str | None = None
+    client_id: str | None = None
+    scopes: tuple[str, ...] = ()
+    token_env: str | None = None
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    id: str
+    protocol: str
+    base_url: str
+    auth: AuthConfig
+    headers: dict[str, str] = field(default_factory=dict)
+    max_output_tokens: int = 4096
+
+
+@dataclass(frozen=True)
+class RunConfig:
+    providers: dict[str, ProviderConfig]
+    agents: tuple[AgentSpec, ...]
+    synthesizer: str
     request_timeout_seconds: int = 600
+    cross_review: bool = True
 
 
-class ConfigStore:
-    def __init__(self, path: Path | None = None) -> None:
-        self.path = path or Path.home() / ".config" / "x-sidechain" / "config.json"
-
-    def load(self) -> AppConfig:
-        if not self.path.exists():
-            return AppConfig()
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return AppConfig()
-        allowed = AppConfig.__dataclass_fields__.keys()
-        return AppConfig(**{key: value for key, value in raw.items() if key in allowed})
-
-    def save(self, config: AppConfig) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        # API keys are deliberately absent from AppConfig and can never be persisted here.
-        self.path.write_text(
-            json.dumps(asdict(config), indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        self.path.chmod(0o600)
+def _required_string(raw: dict[str, Any], key: str, context: str) -> str:
+    value = raw.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{context}.{key} must be a non-empty string")
+    return value.strip()
 
 
-def api_key_for(provider: str) -> str:
+def _auth_config(raw: Any, context: str) -> AuthConfig:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{context}.auth must be an object")
+    auth_type = _required_string(raw, "type", f"{context}.auth")
+    if auth_type not in SUPPORTED_AUTH:
+        raise ValueError(f"{context}.auth.type is unsupported: {auth_type}")
+    scopes = raw.get("scopes", [])
+    if not isinstance(scopes, list) or not all(isinstance(item, str) for item in scopes):
+        raise ValueError(f"{context}.auth.scopes must be a string array")
+    for key in (
+        "env",
+        "header",
+        "scheme",
+        "device_authorization_url",
+        "token_url",
+        "client_id",
+        "token_env",
+    ):
+        if key in raw and not isinstance(raw[key], str):
+            raise ValueError(f"{context}.auth.{key} must be a string")
+    config = AuthConfig(
+        type=auth_type,
+        env=raw.get("env"),
+        header=str(raw.get("header", "Authorization")),
+        scheme=str(raw.get("scheme", "Bearer")),
+        device_authorization_url=raw.get("device_authorization_url"),
+        token_url=raw.get("token_url"),
+        client_id=raw.get("client_id"),
+        scopes=tuple(scopes),
+        token_env=raw.get("token_env"),
+    )
+    if auth_type == "api_key" and not config.env:
+        raise ValueError(f"{context}.auth.env is required for api_key")
+    if auth_type == "oauth_device":
+        missing = [
+            name
+            for name in ("device_authorization_url", "token_url", "client_id")
+            if not getattr(config, name)
+        ]
+        if missing:
+            raise ValueError(f"{context}.auth is missing OAuth fields: {', '.join(missing)}")
+        _validate_url(str(config.device_authorization_url), f"{context}.auth.device_authorization_url")
+        _validate_url(str(config.token_url), f"{context}.auth.token_url")
+    return config
+
+
+def _validate_url(value: str, context: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{context} must be an absolute HTTP(S) URL")
+    return value.rstrip("/")
+
+
+def load_config(path: str | Path) -> RunConfig:
+    source = Path(path)
     try:
-        variable = PROVIDER_KEY_ENV[provider]
-    except KeyError as exc:
-        raise ValueError(f"Unsupported provider: {provider}") from exc
-    value = os.getenv(variable, "").strip()
-    if not value:
-        raise RuntimeError(f"Missing {variable}; export it before starting X-SIDECHAIN")
-    return value
+        raw = json.loads(source.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"cannot read config: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid JSON config at line {exc.lineno}: {exc.msg}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("config root must be an object")
+    if raw.get("version") != 1:
+        raise ValueError("config.version must be 1")
 
+    providers_raw = raw.get("providers")
+    if not isinstance(providers_raw, dict) or not providers_raw:
+        raise ValueError("config.providers must be a non-empty object")
+    providers: dict[str, ProviderConfig] = {}
+    for provider_id, item in providers_raw.items():
+        context = f"providers.{provider_id}"
+        if not isinstance(provider_id, str) or not provider_id.strip() or not isinstance(item, dict):
+            raise ValueError("every provider must have a non-empty ID and object value")
+        protocol = _required_string(item, "protocol", context)
+        if protocol not in SUPPORTED_PROTOCOLS:
+            raise ValueError(f"{context}.protocol is unsupported: {protocol}")
+        headers = item.get("headers", {})
+        if not isinstance(headers, dict) or not all(
+            isinstance(key, str) and isinstance(value, str) for key, value in headers.items()
+        ):
+            raise ValueError(f"{context}.headers must be a string map")
+        max_tokens_raw = item.get("max_output_tokens", 4096)
+        if not isinstance(max_tokens_raw, int) or isinstance(max_tokens_raw, bool):
+            raise ValueError(f"{context}.max_output_tokens must be an integer")
+        max_tokens = max_tokens_raw
+        if max_tokens < 1:
+            raise ValueError(f"{context}.max_output_tokens must be positive")
+        providers[provider_id] = ProviderConfig(
+            id=provider_id,
+            protocol=protocol,
+            base_url=_validate_url(_required_string(item, "base_url", context), f"{context}.base_url"),
+            auth=_auth_config(item.get("auth", {"type": "none"}), context),
+            headers=dict(headers),
+            max_output_tokens=max_tokens,
+        )
 
-def provider_status(provider: str) -> str:
-    variable = PROVIDER_KEY_ENV[provider]
-    return "configured" if os.getenv(variable, "").strip() else f"missing {variable}"
+    agents_raw = raw.get("agents")
+    if not isinstance(agents_raw, list) or len(agents_raw) < 2:
+        raise ValueError("config.agents must contain at least two agents")
+    agents: list[AgentSpec] = []
+    seen: set[str] = set()
+    for index, item in enumerate(agents_raw):
+        context = f"agents[{index}]"
+        if not isinstance(item, dict):
+            raise ValueError(f"{context} must be an object")
+        agent_id = _required_string(item, "id", context)
+        provider_id = _required_string(item, "provider", context)
+        if agent_id in seen:
+            raise ValueError(f"duplicate agent id: {agent_id}")
+        if provider_id not in providers:
+            raise ValueError(f"{context}.provider does not exist: {provider_id}")
+        seen.add(agent_id)
+        agents.append(
+            AgentSpec(
+                id=agent_id,
+                provider=provider_id,
+                model=_required_string(item, "model", context),
+                role=_required_string(item, "role", context),
+            )
+        )
+
+    synthesizer = _required_string(raw, "synthesizer", "config")
+    if synthesizer not in seen:
+        raise ValueError("config.synthesizer must reference an agent id")
+    timeout_raw = raw.get("request_timeout_seconds", 600)
+    if not isinstance(timeout_raw, int) or isinstance(timeout_raw, bool):
+        raise ValueError("request_timeout_seconds must be an integer")
+    timeout = timeout_raw
+    if timeout < 1 or timeout > 3600:
+        raise ValueError("request_timeout_seconds must be between 1 and 3600")
+    cross_review = raw.get("cross_review", True)
+    if not isinstance(cross_review, bool):
+        raise ValueError("cross_review must be a boolean")
+    return RunConfig(
+        providers=providers,
+        agents=tuple(agents),
+        synthesizer=synthesizer,
+        request_timeout_seconds=timeout,
+        cross_review=cross_review,
+    )

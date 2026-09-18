@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "providers": {
+    "openai": {
+      "protocol": "responses",
+      "base_url": "https://api.openai.com/v1",
+      "auth": {
+        "type": "api_key",
+        "env": "OPENAI_API_KEY",
+        "header": "Authorization",
+        "scheme": "Bearer"
+      }
+    },
+    "anthropic": {
+      "protocol": "anthropic_messages",
+      "base_url": "https://api.anthropic.com/v1",
+      "auth": {
+        "type": "api_key",
+        "env": "ANTHROPIC_API_KEY",
+        "header": "x-api-key",
+        "scheme": ""
+      }
+    },
+    "xai": {
+      "protocol": "chat_completions",
+      "base_url": "https://api.x.ai/v1",
+      "auth": {
+        "type": "api_key",
+        "env": "XAI_API_KEY",
+        "header": "Authorization",
+        "scheme": "Bearer"
+      }
+    },
+    "openrouter": {
+      "protocol": "chat_completions",
+      "base_url": "https://openrouter.ai/api/v1",
+      "auth": {
+        "type": "api_key",
+        "env": "OPENROUTER_API_KEY",
+        "header": "Authorization",
+        "scheme": "Bearer"
+      }
+    },
+    "ollama-local": {
+      "protocol": "chat_completions",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "auth": {"type": "none"}
+    }
+  },
+  "agents": [
+    {
+      "id": "discovery",
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "role": "Expand the attack surface. Separate facts, observations, and inference. Require an observable artifact."
+    },
+    {
+      "id": "validator",
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "role": "Try to kill unsupported claims. State the first decisive deny or allow artifact."
+    },
+    {
+      "id": "independent",
+      "provider": "xai",
+      "model": "grok-4.6",
+      "role": "Search for an independent path and challenge shared assumptions."
+    },
+    {
+      "id": "local-reviewer",
+      "provider": "ollama-local",
+      "model": "qwen3:latest",
+      "role": "Review the claim locally and identify missing evidence."
+    }
+  ],
+  "synthesizer": "validator",
+  "cross_review": true,
+  "request_timeout_seconds": 600
+}

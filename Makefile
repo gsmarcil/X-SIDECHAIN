@@ -7,5 +7,4 @@ check: test
 	PYTHONPATH=src python3 -m compileall -q src tests
 
 run:
-	PYTHONPATH=src python3 -m x_sidechain
-
+	PYTHONPATH=src python3 -m x_sidechain validate-config --config x-sidechain.example.json

@@ -2,68 +2,106 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from x_sidechain.audit import AuditLog
-from x_sidechain.config import AppConfig
-from x_sidechain.models import AgentSpec
-from x_sidechain.orchestrator import SidechainOrchestrator
-from x_sidechain.prompts import EXPLORER_ROLE, VALIDATOR_ROLE
+from x_sidechain.auth import oauth_device_login
+from x_sidechain.config import RunConfig, load_config
+from x_sidechain.orchestrator import AgentRuntime, SidechainOrchestrator
 from x_sidechain.providers import create_provider
 
 
-def _agent(value: str) -> tuple[str, str]:
-    provider, separator, model = value.partition(":")
-    if not separator or not provider or not model:
-        raise argparse.ArgumentTypeError("agent must be PROVIDER:MODEL")
-    return provider, model
-
-
 def _parser() -> argparse.ArgumentParser:
-    defaults = AppConfig()
-    parser = argparse.ArgumentParser(prog="x-sidechain")
-    parser.add_argument("--verify", metavar="AUDIT.jsonl", help="verify a tamper-evident audit log")
-    parser.add_argument("--prompt", help="run headless with this task instead of starting the GUI")
-    parser.add_argument(
-        "--agent-a",
-        type=_agent,
-        default=(defaults.agent_a_provider, defaults.agent_a_model),
-        metavar="PROVIDER:MODEL",
+    parser = argparse.ArgumentParser(
+        prog="x-sidechain",
+        description="Provider-agnostic, evidence-first multi-agent deliberation engine",
     )
-    parser.add_argument(
-        "--agent-b",
-        type=_agent,
-        default=(defaults.agent_b_provider, defaults.agent_b_model),
-        metavar="PROVIDER:MODEL",
-    )
-    parser.add_argument("--synthesizer", choices=("a", "b"), default="a")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+
+    run = subcommands.add_parser("run", help="run every configured agent")
+    run.add_argument("--config", required=True, metavar="FILE.json")
+    prompt = run.add_mutually_exclusive_group(required=True)
+    prompt.add_argument("--prompt")
+    prompt.add_argument("--prompt-file", metavar="FILE")
+
+    validate = subcommands.add_parser("validate-config", help="validate configuration without API calls")
+    validate.add_argument("--config", required=True, metavar="FILE.json")
+
+    providers = subcommands.add_parser("providers", help="list providers, protocols, and auth modes")
+    providers.add_argument("--config", required=True, metavar="FILE.json")
+
+    auth = subcommands.add_parser("auth", help="provider account authentication")
+    auth_subcommands = auth.add_subparsers(dest="auth_command", required=True)
+    login = auth_subcommands.add_parser("login", help="run an official OAuth Device Flow")
+    login.add_argument("provider")
+    login.add_argument("--config", required=True, metavar="FILE.json")
+
+    verify = subcommands.add_parser("verify", help="verify a tamper-evident audit log")
+    verify.add_argument("audit_log", metavar="AUDIT.jsonl")
     return parser
+
+
+def _runtimes(config: RunConfig) -> tuple[AgentRuntime, ...]:
+    return tuple(
+        AgentRuntime(
+            spec=agent,
+            provider=create_provider(
+                config.providers[agent.provider],
+                agent.model,
+                config.request_timeout_seconds,
+            ),
+        )
+        for agent in config.agents
+    )
+
+
+def _task(args: argparse.Namespace) -> str:
+    if args.prompt is not None:
+        return args.prompt
+    try:
+        return Path(args.prompt_file).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"cannot read prompt file: {exc}") from exc
 
 
 def main() -> int:
     args = _parser().parse_args()
-    if args.verify:
-        valid, message = AuditLog.verify(args.verify)
+    if args.command == "verify":
+        valid, message = AuditLog.verify(args.audit_log)
         print(("PASS" if valid else "FAIL") + f": {message}")
         return 0 if valid else 1
-    if not args.prompt:
-        from x_sidechain.ui import launch
 
-        launch()
-        return 0
-
-    provider_a_name, model_a = args.agent_a
-    provider_b_name, model_b = args.agent_b
-    result = SidechainOrchestrator(
-        provider_a=create_provider(provider_a_name, model_a),
-        provider_b=create_provider(provider_b_name, model_b),
-        agent_a=AgentSpec("Agent A", provider_a_name, model_a, EXPLORER_ROLE),
-        agent_b=AgentSpec("Agent B", provider_b_name, model_b, VALIDATOR_ROLE),
-        synthesizer=args.synthesizer,
-        progress=lambda message: print(f"[x-sidechain] {message}", flush=True),
-    ).run(args.prompt)
-    print(json.dumps({"session_id": result.session_id, "audit_path": result.audit_path}, indent=2))
-    print("\n" + result.synthesis.text)
-    return 0
+    try:
+        config = load_config(args.config)
+        if args.command == "validate-config":
+            print(
+                f"PASS: {len(config.providers)} providers, {len(config.agents)} agents, "
+                f"synthesizer={config.synthesizer}"
+            )
+            return 0
+        if args.command == "providers":
+            for provider in config.providers.values():
+                print(f"{provider.id}\t{provider.protocol}\t{provider.auth.type}\t{provider.base_url}")
+            return 0
+        if args.command == "auth" and args.auth_command == "login":
+            if args.provider not in config.providers:
+                raise ValueError(f"unknown provider: {args.provider}")
+            print(oauth_device_login(config.providers[args.provider]))
+            return 0
+        if args.command == "run":
+            result = SidechainOrchestrator(
+                agents=_runtimes(config),
+                synthesizer_id=config.synthesizer,
+                cross_review=config.cross_review,
+                progress=lambda message: print(f"[x-sidechain] {message}", flush=True),
+            ).run(_task(args))
+            print(json.dumps({"session_id": result.session_id, "audit_path": result.audit_path}, indent=2))
+            print("\n" + result.synthesis.text)
+            return 0
+    except (RuntimeError, ValueError) as exc:
+        print(f"ERROR: {exc}")
+        return 2
+    return 2
 
 
 if __name__ == "__main__":
