@@ -31,7 +31,9 @@ the filesystem directly. Future tools must be confined to the owning agent direc
   the clear. Set `"allow_insecure_http": true` on that provider to accept the risk
   deliberately, for example for a trusted host on a private link.
 - Keys and OAuth tokens are excluded from configuration output, workspaces, and audit
-  payloads.
+  payloads. A provider that echoes the request could return the very credential used
+  to call it, so an error body is scrubbed of the outgoing auth header values, and of
+  common token shapes, before anything is written to disk.
 - OAuth is allowed only through provider-published Device Authorization Grant values.
 - OAuth tokens are stored through Linux Secret Service using `secret-tool`.
 - X-SIDECHAIN never automates passwords, scrapes login pages, or reads email.
@@ -55,7 +57,10 @@ Do not combine providers that are not all authorized to receive the task materia
   `provider returned HTTP 503`; the response body can echo request headers or another
   tenant's data, and the briefs of agents from different vendors share one room. The
   full text is written to the failing agent's private workspace as
-  `provider-errors.log` (`0600`) for the local operator only.
+  `provider-errors.log` (`0600`) for the local operator only. That file holds text the
+  provider chose to return, scrubbed of credentials but not otherwise filtered: it is
+  the one place provider error content is kept, it never reaches a model, and it is
+  readable by the machine owner like every other workspace file.
 - Abstentions name the step that is missing (`no brief`, `no clarification`,
   `no review`), so an agent that filed a brief and then missed one step is never
   reported to the chair as absent.
