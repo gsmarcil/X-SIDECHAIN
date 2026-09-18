@@ -105,6 +105,11 @@ def _abstentions(abstentions: Mapping[str, str]) -> str:
     return "\n".join(f"- {name}: {reason}" for name, reason in abstentions.items())
 
 
+MISSING_RULE = """Each line names exactly what an agent did not deliver, not that the
+agent is absent overall: one that filed a brief but missed a later step still
+contributed what it filed. Missing input is absent evidence, never agreement."""
+
+
 def chair_draft_prompt(
     task: str,
     steering: Sequence[str],
@@ -125,9 +130,9 @@ PUBLIC BRIEFS
 TARGETED CLARIFICATIONS
 {clarification_text}
 
-AGENTS THAT DID NOT REPORT
+MISSING CONTRIBUTIONS
 {_abstentions(abstentions or {})}
-Treat a missing agent as absent evidence, never as agreement.
+{MISSING_RULE}
 
 Use these sections: PROVISIONAL_VERDICT, SUPPORTED_CLAIMS, UNSUPPORTED_CLAIMS,
 DISAGREEMENTS, DECISIVE_EVIDENCE, NEXT_ACTION."""
@@ -178,10 +183,10 @@ CHAIR DRAFT
 PEER REVIEWS
 {_named(reviews, 'REVIEW')}
 
-AGENTS THAT DID NOT REPORT
+MISSING CONTRIBUTIONS
 {_abstentions(abstentions or {})}
-An absent agent reviewed nothing. Say so in COVERAGE rather than counting it as
-agreement, and lower confidence accordingly.
+{MISSING_RULE}
+State the gaps in COVERAGE and lower confidence accordingly.
 
 Use exactly these sections:
 VERDICT

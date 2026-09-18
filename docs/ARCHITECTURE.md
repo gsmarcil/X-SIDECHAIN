@@ -29,7 +29,11 @@ For `N` agents and one configured chair:
 
 A provider failure at any step is recorded as that agent abstaining, published as
 `agent.abstention`, and carried into the chair's draft and final prompts, which are
-told to read absence as missing evidence rather than as agreement. The session stops
+told to read absence as missing evidence rather than as agreement. What is published
+is a cause this project wrote (`provider returned HTTP 503`), never the provider's
+own text; the full detail goes to that agent's private workspace instead. Each note
+names the missing step, so an agent that filed a brief and then missed a later one is
+not reported as absent. The session stops
 only when the chair itself fails or when fewer than `min_agent_quorum` briefs exist.
 
 This topology avoids a free-for-all room: agents cannot continuously interrupt one
@@ -47,7 +51,10 @@ is more expensive than patching a single response but gives a clear audit bounda
 
 Because each correction pays for a whole new cycle, corrections are refused once any
 of three bounds is reached: `max_revisions`, the session deadline, or a remaining
-call budget smaller than one full cycle. A refused correction is reported to the user
+call budget smaller than one full cycle. Accepting a correction also stops the
+superseded cycle at its next call reservation, which is what makes that budget check
+exact: no further call is reserved after it runs, so an accepted correction can
+always afford its restart. A refused correction is reported to the user
 and leaves the running cycle free to finish, which is what guarantees that a session
 ends with a result rather than an exhausted budget.
 
@@ -59,6 +66,7 @@ SESSION_ID/workspaces/
     analysis.md
     summary.md             # published brief, capped at max_public_brief_chars
     summary.full.md        # only when the brief had to be cut
+    provider-errors.log    # operator-only failure detail, never sent to a model
     clarification.md        # only when asked
     review.md               # non-chair agents
     chair/                  # chair only

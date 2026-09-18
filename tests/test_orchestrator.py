@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from x_sidechain.audit import AuditLog
+from x_sidechain.http import ProviderHTTPError
 from x_sidechain.models import AgentSpec, ModelReply
 from x_sidechain.orchestrator import AgentRuntime, SidechainOrchestrator
 
@@ -294,7 +295,9 @@ class OrchestratorTests(unittest.TestCase):
 
             self.assertEqual(result.events[-1].kind, "chair.final")
             self.assertIn("down", result.abstentions)
-            self.assertIn("provider unavailable", result.abstentions["down"])
+            # Phase-accurate, and carrying no provider text.
+            self.assertEqual(result.abstentions["down"], "no brief (RuntimeError)")
+            self.assertNotIn("provider unavailable", result.abstentions["down"])
             abstained = [event for event in result.events if event.kind == "agent.abstention"]
             self.assertEqual([event.author for event in abstained], ["down"])
             summaries = [event.author for event in result.events if event.kind == "agent.summary"]
@@ -315,9 +318,11 @@ class OrchestratorTests(unittest.TestCase):
                 prompt for _, prompt in chair_provider.calls if prompt.startswith("FINAL RESULT")
             )
             for prompt in (draft_prompt, final_prompt_text):
-                self.assertIn("AGENTS THAT DID NOT REPORT", prompt)
-                self.assertIn("down: RuntimeError: provider unavailable", prompt)
-            self.assertIn("never as agreement", draft_prompt)
+                self.assertIn("MISSING CONTRIBUTIONS", prompt)
+                self.assertIn("down: no brief (RuntimeError)", prompt)
+                # The provider's own words never reach another agent's prompt.
+                self.assertNotIn("provider unavailable", prompt)
+            self.assertIn("never agreement", draft_prompt)
 
     def test_chair_failure_is_fatal_even_when_peers_report(self) -> None:
         class FailingChair(ScriptedProvider):
@@ -350,7 +355,10 @@ class OrchestratorTests(unittest.TestCase):
             orchestrator = SidechainOrchestrator(
                 agents, "chair", min_agent_quorum=3, audit_directory=Path(directory)
             )
-            with self.assertRaisesRegex(RuntimeError, "definitive failure"):
+            # Names who failed and how, without quoting the provider back.
+            with self.assertRaisesRegex(
+                RuntimeError, r"below min_agent_quorum=3 .*down-one: RuntimeError"
+            ):
                 orchestrator.run("claim")
 
     def test_oversized_public_brief_is_cut_and_the_full_text_kept_privately(self) -> None:
@@ -473,6 +481,159 @@ class OrchestratorTests(unittest.TestCase):
             # The running cycle still finishes, so the session yields a result.
             self.assertEqual(result.events[-1].kind, "chair.final")
 
+    def test_provider_error_text_never_leaves_the_failing_agent(self) -> None:
+        secret = "access_token=TOPSECRET-abc123"
+
+        class LeakyProvider(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                raise ProviderHTTPError(
+                    "provider returned HTTP 400",
+                    status=400,
+                    detail=f'{{"error": "bad {secret}"}}',
+                )
+
+        chair = ScriptedProvider("chair")
+        agents = (
+            runtime("chair", chair),
+            runtime("peer", ScriptedProvider("peer")),
+            runtime("leaky", LeakyProvider("leaky")),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = SidechainOrchestrator(
+                agents,
+                chair_id="chair",
+                max_clarification_questions=0,
+                min_agent_quorum=2,
+                audit_directory=Path(directory),
+            ).run("claim")
+
+            room = "\n".join(event.content for event in result.events)
+            audit = Path(result.audit_path).read_text(encoding="utf-8")
+            chair_prompts = "\n".join(
+                prompt
+                for _, prompt in chair.calls
+                if prompt.startswith(("CHAIR DRAFT", "FINAL RESULT"))
+            )
+            for surface, name in (
+                (room, "room events"),
+                (audit, "audit log"),
+                (chair_prompts, "chair prompts"),
+                ("".join(result.abstentions.values()), "result"),
+            ):
+                self.assertNotIn(secret, surface, f"provider text leaked into {name}")
+
+            # The status still reaches the room, so the failure is not silent.
+            self.assertEqual(result.abstentions["leaky"], "no brief (provider returned HTTP 400)")
+            self.assertIn("provider returned HTTP 400", room)
+
+            # The detail survives for the operator, in that agent's own workspace.
+            private = Path(result.workspace_root) / "revision-0/agents/leaky/provider-errors.log"
+            self.assertTrue(private.is_file())
+            self.assertIn(secret, private.read_text(encoding="utf-8"))
+            self.assertEqual(stat.S_IMODE(private.stat().st_mode), 0o600)
+
+    def test_abstention_is_recorded_per_phase_not_as_blanket_absence(self) -> None:
+        class FlakyOnClarification(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                if prompt.startswith("Answer one targeted chair question"):
+                    raise RuntimeError("clarification hiccup")
+                return super().generate(system, prompt)
+
+        chair = ScriptedProvider("chair", question_target="peer")
+        with tempfile.TemporaryDirectory() as directory:
+            result = SidechainOrchestrator(
+                (runtime("chair", chair), runtime("peer", FlakyOnClarification("peer"))),
+                chair_id="chair",
+                audit_directory=Path(directory),
+            ).run("claim")
+
+            authors = {kind: [] for kind in ("agent.summary", "agent.review")}
+            for event in result.events:
+                if event.kind in authors:
+                    authors[event.kind].append(event.author)
+
+            # peer did file a brief and a review; only its clarification is missing.
+            self.assertIn("peer", authors["agent.summary"])
+            self.assertIn("peer", authors["agent.review"])
+            self.assertEqual(result.abstentions["peer"], "no clarification (RuntimeError)")
+            final = next(
+                prompt for _, prompt in chair.calls if prompt.startswith("FINAL RESULT")
+            )
+            self.assertIn("peer: no clarification (RuntimeError)", final)
+
+    def test_accepted_correction_always_leaves_budget_for_its_restart(self) -> None:
+        gate = threading.Event()
+        reached = threading.Event()
+
+        class SlowBrief(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                if prompt.startswith("Create the public brief"):
+                    reached.set()
+                    gate.wait(timeout=10)
+                return super().generate(system, prompt)
+
+        with tempfile.TemporaryDirectory() as directory:
+            # Enough for one cycle plus three calls: the old accounting would accept
+            # the correction and then find the restart unaffordable.
+            orchestrator = SidechainOrchestrator(
+                (runtime("chair", SlowBrief("chair")), runtime("peer", SlowBrief("peer"))),
+                chair_id="chair",
+                max_clarification_questions=0,
+                max_model_calls=11,
+                audit_directory=Path(directory),
+            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(orchestrator.run, "original task")
+                self.assertTrue(reached.wait(timeout=10))
+                accepted = True
+                try:
+                    orchestrator.inject_user_message("correction")
+                except RuntimeError:
+                    accepted = False
+                gate.set()
+                # Whether the correction was accepted or refused, the session must
+                # still produce a result rather than exhausting its budget.
+                result = future.result(timeout=30)
+
+            self.assertEqual(result.events[-1].kind, "chair.final")
+            if accepted:
+                self.assertEqual(result.events[-1].revision, 1)
+            self.assertLessEqual(result.model_calls, 11)
+
+    def test_superseded_cycle_stops_spending_and_is_recorded(self) -> None:
+        gate = threading.Event()
+        reached = threading.Event()
+
+        class SlowBrief(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                if prompt.startswith("Create the public brief") and not reached.is_set():
+                    reached.set()
+                    gate.wait(timeout=10)
+                return super().generate(system, prompt)
+
+        chair = SlowBrief("chair")
+        peer = SlowBrief("peer")
+        with tempfile.TemporaryDirectory() as directory:
+            orchestrator = SidechainOrchestrator(
+                (runtime("chair", chair), runtime("peer", peer)),
+                chair_id="chair",
+                max_clarification_questions=0,
+                audit_directory=Path(directory),
+            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(orchestrator.run, "original task")
+                self.assertTrue(reached.wait(timeout=10))
+                orchestrator.inject_user_message("correction")
+                gate.set()
+                result = future.result(timeout=30)
+
+            # The supersede is recorded even though the cycle stopped at a call
+            # reservation rather than at a phase boundary.
+            self.assertIn("cycle.superseded", Path(result.audit_path).read_text(encoding="utf-8"))
+            # A full restarted cycle is 8 calls; the abandoned one must not have
+            # paid for a second chair triage, draft, review and final.
+            self.assertLess(result.model_calls, 8 + 8)
+
     def test_failed_provider_closes_session_with_valid_audit(self) -> None:
         class FailingProvider(ScriptedProvider):
             def generate(self, system: str, prompt: str) -> ModelReply:
@@ -484,7 +645,7 @@ class OrchestratorTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             orchestrator = SidechainOrchestrator(agents, "chair", audit_directory=Path(directory))
-            with self.assertRaisesRegex(RuntimeError, "definitive failure"):
+            with self.assertRaisesRegex(RuntimeError, "below min_agent_quorum"):
                 orchestrator.run("claim")
             log = next(Path(directory).glob("*.jsonl"))
             valid, message = AuditLog.verify(log)
