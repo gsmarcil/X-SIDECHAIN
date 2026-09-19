@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#0b111b">
+    <meta name="description" content="X-SIDECHAIN local multi-agent deliberation workspace">
+    <title>X-SIDECHAIN</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%232f7df6'/%3E%3Cpath d='M18 18l28 28M46 18L18 46' stroke='white' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <svg class="symbol-sprite" aria-hidden="true">
+      <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+      <symbol id="i-room" viewBox="0 0 24 24"><path d="M4 6h16v11H8l-4 3z"/></symbol>
+      <symbol id="i-sessions" viewBox="0 0 24 24"><path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/></symbol>
+      <symbol id="i-agents" viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c.6-3.3 2.2-5 5-5s4.4 1.7 5 5M13 18c.5-2.4 1.8-3.6 4-3.6 2.1 0 3.4 1.2 4 3.6"/></symbol>
+      <symbol id="i-workspace" viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3z"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+      <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="M8 12.5l6.3-6.3a3 3 0 114.2 4.2L10 18.9a5 5 0 01-7.1-7.1l8.5-8.5"/></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="M3 11.5L21 3l-8.5 18-2-7.5zM10.5 13.5L21 3"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v5c0 5-3.3 8.7-8 10-4.7-1.3-8-5-8-10V6z"/><path d="M9 12l2 2 4-5"/></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="M15 15l5 5"/></symbol>
+      <symbol id="i-github" viewBox="0 0 24 24"><path d="M12 2a10 10 0 00-3.2 19.5v-2.2c-2.6.6-3.1-1.1-3.1-1.1-.4-1.1-1.1-1.4-1.1-1.4-.9-.6.1-.6.1-.6 1 0 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.8.8.1-.6.4-1.1.7-1.4-2.1-.2-4.3-1-4.3-4.6 0-1 .4-1.9 1-2.5-.1-.3-.4-1.2.1-2.5 0 0 .8-.3 2.7 1a9.4 9.4 0 014.8 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.2.1 2.5.6.6 1 1.5 1 2.5 0 3.6-2.2 4.4-4.3 4.6.4.3.7.9.7 1.8v3A10 10 0 0012 2z"/></symbol>
+    </svg>
+
+    <div class="app-shell" id="appShell">
+      <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+        <div class="sidebar-brand">
+          <span class="brand-mark" aria-hidden="true">X</span>
+          <span class="brand-name">X-SIDECHAIN</span>
+        </div>
+        <button class="sidebar-toggle icon-button" id="sidebarToggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar (Ctrl+\)">
+          <svg><use href="#i-panel"/></svg>
+        </button>
+
+        <nav class="main-nav">
+          <button class="nav-item active" type="button" data-view-target="room" data-tooltip="Room">
+            <svg><use href="#i-room"/></svg><span data-i18n="nav.room">Room</span>
+          </button>
+          <button class="nav-item" type="button" data-view-target="sessions" data-tooltip="Sessions">
+            <svg><use href="#i-sessions"/></svg><span data-i18n="nav.sessions">Sessions</span><span class="nav-count">27</span>
+          </button>
+          <button class="nav-item" type="button" data-view-target="agents" data-tooltip="Agents">
+            <svg><use href="#i-agents"/></svg><span data-i18n="nav.agents">Agents</span><span class="nav-count">6</span>
+          </button>
+          <button class="nav-item" type="button" data-view-target="workspaces" data-tooltip="Workspaces">
+            <svg><use href="#i-workspace"/></svg><span data-i18n="nav.workspaces">Workspaces</span>
+          </button>
+          <button class="nav-item" type="button" data-view-target="settings" data-tooltip="Settings">
+            <svg><use href="#i-settings"/></svg><span data-i18n="nav.settings">Settings</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="verified" title="Audit chain verified"><span class="status-dot"></span><span>Chain verified · 18</span></div>
+          <span class="version">v0.4.0 · Linux</span>
+        </div>
+      </aside>
+
+      <section class="app-area">
+        <header class="topbar">
+          <div class="session-identity">
+            <strong id="topTitle">Kernel audit</strong>
+            <span class="privacy-pill"><svg><use href="#i-lock"/></svg> Local only</span>
+          </div>
+          <div class="top-actions">
+            <select class="language-select" id="languageSelect" aria-label="Interface language">
+              <option value="en">English</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
+              <option value="ar">العربية</option>
+            </select>
+            <button class="button secondary" type="button" id="newSession"><svg><use href="#i-plus"/></svg><span data-i18n="action.newSession">New session</span></button>
+            <button class="icon-button" type="button" id="moreActions" aria-label="More session actions"><svg><use href="#i-more"/></svg></button>
+          </div>
+          <div class="action-menu" id="actionMenu" hidden>
+            <button type="button">Import session</button>
+            <button type="button">Export sanitized bundle</button>
+            <button type="button">Open audit trail</button>
+          </div>
+        </header>
+
+        <main class="views">
+          <section class="view active" data-view="room" aria-labelledby="roomHeading">
+            <div class="page-heading compact-heading">
+              <div>
+                <div class="eyebrow"><span class="live-dot"></span><span id="runState" data-i18n="room.running">Running</span> · revision <span id="revisionNumber">1</span></div>
+                <h1 id="roomHeading" data-i18n="room.title">Chair room</h1>
+              </div>
+              <div class="room-actions">
+                <button class="button secondary" type="button" id="holdButton" data-i18n="action.hold">Hold input</button>
+                <button class="button danger" type="button" id="finishButton" data-i18n="action.finish">Finish now</button>
+              </div>
+            </div>
+
+            <div class="agent-strip" aria-label="Agents in this session">
+              <button class="agent-chip chair" type="button" data-agent="validator">
+                <span class="avatar">VA</span><span><strong>validator</strong><small>Chair · Claude Sonnet</small></span><span class="online-dot"></span>
+              </button>
+              <button class="agent-chip" type="button" data-agent="discovery">
+                <span class="avatar">DI</span><span><strong>discovery</strong><small>Explorer · GPT</small></span><span class="online-dot"></span>
+              </button>
+              <button class="agent-chip" type="button" data-agent="independent">
+                <span class="avatar">IN</span><span><strong>independent</strong><small>Challenger · Grok</small></span><span class="online-dot"></span>
+              </button>
+              <button class="agent-chip" type="button" data-agent="local-reviewer">
+                <span class="avatar">LR</span><span><strong>local-reviewer</strong><small>Local · Qwen</small></span><span class="online-dot local"></span>
+              </button>
+              <button class="add-agent" type="button" id="addAgentInline"><svg><use href="#i-plus"/></svg><span data-i18n="action.agent">Agent</span></button>
+            </div>
+
+            <div class="phase-card">
+              <div class="phase-title"><strong data-i18n="room.workflow">Live deliberation</strong><span id="phaseCounter">phase 4 of 7</span></div>
+              <ol class="phase-track" id="phaseTrack">
+                <li class="done"><span>1</span><small>Private work</small></li>
+                <li class="done"><span>2</span><small>Public briefs</small></li>
+                <li class="done"><span>3</span><small>Chair triage</small></li>
+                <li class="current"><span>4</span><small>Clarifications</small></li>
+                <li><span>5</span><small>Chair draft</small></li>
+                <li><span>6</span><small>Peer review</small></li>
+                <li><span>7</span><small>Final result</small></li>
+              </ol>
+            </div>
+
+            <div class="room-grid">
+              <div class="conversation-column">
+                <div class="event-list" id="eventList" aria-live="polite">
+                  <article class="event-card chair-event">
+                    <div class="event-meta"><span class="avatar small">VA</span><strong>validator</strong><span class="tag">CHAIR</span><time>10:14</time></div>
+                    <p>You decoded the cursor. Did any captured response return a row owned by another tenant, or is the result still inference?</p>
+                    <div class="event-foot"><span class="tag warning">Blocks verdict</span><span>Directed to discovery</span></div>
+                  </article>
+                  <button class="event-card summary-event" type="button" data-open-agent="discovery">
+                    <div class="event-meta"><span class="avatar small">DI</span><strong>discovery</strong><span class="tag blue">PUBLIC BRIEF</span><time>10:16</time></div>
+                    <p><b>CLAIM:</b> The export cursor is opaque but not proven tenant-bound. <b>EVIDENCE:</b> it decodes to a tenant and offset pair. <b>STOP:</b> a foreign-row response or a definitive authorization deny.</p>
+                    <div class="event-foot"><span class="tag warning">Uncertainty: medium</span><span class="open-private">Open private chat →</span></div>
+                  </button>
+                  <button class="event-card summary-event" type="button" data-open-agent="independent">
+                    <div class="event-meta"><span class="avatar small">IN</span><strong>independent</strong><span class="tag blue">PUBLIC BRIEF</span><time>10:17</time></div>
+                    <p><b>CLAIM:</b> The current artifact proves controllable cursor structure only. <b>FASTEST PATH:</b> replay the cursor under a second authorized tenant and record the first allow or deny.</p>
+                    <div class="event-foot"><span class="tag neutral">Needs validation</span><span class="open-private">Open private chat →</span></div>
+                  </button>
+                </div>
+
+                <form class="composer" id="composer">
+                  <label for="promptInput" data-i18n="composer.label">Send one correction to the whole room</label>
+                  <textarea id="promptInput" rows="3" placeholder="Add a fact, correction, or decisive artifact…"></textarea>
+                  <div class="file-chips" id="fileChips"></div>
+                  <div class="composer-actions">
+                    <div>
+                      <input type="file" id="fileInput" multiple hidden>
+                      <button class="button ghost" type="button" id="attachButton"><svg><use href="#i-paperclip"/></svg><span data-i18n="action.files">Files</span></button>
+                      <span class="composer-note">Private files stay local until a session explicitly includes them.</span>
+                    </div>
+                    <button class="button primary" type="submit"><span data-i18n="action.sendRoom">Send to room</span><svg><use href="#i-send"/></svg></button>
+                  </div>
+                </form>
+              </div>
+
+              <aside class="session-panel" aria-label="Session summary">
+                <div class="panel-heading"><strong data-i18n="room.session">Session</strong><span class="tag green">Bounded</span></div>
+                <dl class="metrics">
+                  <div><dt>Quorum</dt><dd>4 of 5</dd></div>
+                  <div><dt>Model calls</dt><dd>18 / 54</dd></div>
+                  <div><dt>Tokens</dt><dd>42.8k</dd></div>
+                  <div><dt>Deadline</dt><dd>42 min</dd></div>
+                  <div><dt>Restarts</dt><dd>1 available</dd></div>
+                </dl>
+                <div class="budget-bar"><span></span></div>
+                <div class="guard-list">
+                  <div><svg><use href="#i-lock"/></svg><span>Provider errors contained</span></div>
+                  <div><svg><use href="#i-lock"/></svg><span>Private workspaces isolated</span></div>
+                  <div><svg><use href="#i-shield"/></svg><span>Audit chain verified</span></div>
+                </div>
+                <button class="button secondary full" type="button" id="viewAudit">View session audit</button>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view" data-view="sessions" aria-labelledby="sessionsHeading">
+            <div class="page-heading"><div><span class="eyebrow">27 local sessions</span><h1 id="sessionsHeading" data-i18n="sessions.title">Sessions</h1><p>Resume work, inspect results, or verify an audit chain.</p></div><button class="button primary" type="button"><svg><use href="#i-plus"/></svg>New session</button></div>
+            <div class="toolbar"><label class="search-box"><svg><use href="#i-search"/></svg><input type="search" placeholder="Search sessions"></label><select><option>All states</option><option>Running</option><option>Complete</option><option>Failed</option></select></div>
+            <div class="table-card">
+              <table><thead><tr><th>Session</th><th>Status</th><th>Agents</th><th>Updated</th><th>Audit</th></tr></thead><tbody>
+                <tr><td><strong>Kernel audit</strong><small>Cursor tenant isolation</small></td><td><span class="tag blue">Running</span></td><td>5</td><td>Now</td><td><span class="tag green">Verified</span></td></tr>
+                <tr><td><strong>API boundary review</strong><small>Foreign object access</small></td><td><span class="tag green">Complete</span></td><td>4</td><td>Yesterday</td><td><span class="tag green">Verified</span></td></tr>
+                <tr><td><strong>Provider comparison</strong><small>Contradiction analysis</small></td><td><span class="tag neutral">Held</span></td><td>3</td><td>3 days ago</td><td><span class="tag green">Verified</span></td></tr>
+              </tbody></table>
+            </div>
+          </section>
+
+          <section class="view" data-view="agents" aria-labelledby="agentsHeading">
+            <div class="page-heading"><div><span class="eyebrow">Reusable team</span><h1 id="agentsHeading" data-i18n="agents.title">Agents</h1><p>Assign roles without limiting provider or model choice.</p></div><button class="button primary" type="button" id="addAgentButton"><svg><use href="#i-plus"/></svg>Add agent</button></div>
+            <div class="cards-grid agent-library">
+              <article class="config-card featured"><div class="card-top"><span class="avatar">VA</span><span class="tag blue">Chair</span></div><h2>validator</h2><p>Challenges unsupported claims and controls clarification.</p><dl><div><dt>Provider</dt><dd>Anthropic</dd></div><div><dt>Model</dt><dd>Claude Sonnet</dd></div></dl><button class="button secondary full" type="button">Edit agent</button></article>
+              <article class="config-card"><div class="card-top"><span class="avatar">DI</span><span class="online-dot"></span></div><h2>discovery</h2><p>Expands the attack surface and identifies observable artifacts.</p><dl><div><dt>Provider</dt><dd>OpenAI</dd></div><div><dt>Model</dt><dd>GPT</dd></div></dl><button class="button secondary full" type="button">Edit agent</button></article>
+              <article class="config-card"><div class="card-top"><span class="avatar">IN</span><span class="online-dot"></span></div><h2>independent</h2><p>Searches for an independent path and shared assumptions.</p><dl><div><dt>Provider</dt><dd>xAI</dd></div><div><dt>Model</dt><dd>Grok</dd></div></dl><button class="button secondary full" type="button">Edit agent</button></article>
+              <article class="config-card"><div class="card-top"><span class="avatar">LR</span><span class="tag green">Local</span></div><h2>local-reviewer</h2><p>Reviews sensitive material without sending it off-device.</p><dl><div><dt>Runtime</dt><dd>Ollama</dd></div><div><dt>Model</dt><dd>Qwen</dd></div></dl><button class="button secondary full" type="button">Edit agent</button></article>
+            </div>
+          </section>
+
+          <section class="view" data-view="workspaces" aria-labelledby="workspacesHeading">
+            <div class="page-heading"><div><span class="eyebrow">Local-first context</span><h1 id="workspacesHeading" data-i18n="workspaces.title">Workspaces</h1><p>Control exactly which files and repositories enter a session.</p></div><button class="button primary" type="button"><svg><use href="#i-plus"/></svg>Add workspace</button></div>
+            <div class="workspace-layout">
+              <article class="config-card wide-card"><div class="card-top"><div><span class="tag green">Mounted</span><h2>Kernel audit</h2></div><button class="icon-button"><svg><use href="#i-more"/></svg></button></div><p class="path">~/research/linux-dwc2</p><div class="workspace-stats"><span>1,284 files</span><span>218 MB</span><span>Read only</span></div><div class="guard-list horizontal"><div><svg><use href="#i-lock"/></svg>Path boundary enforced</div><div><svg><use href="#i-lock"/></svg>Files never executed</div></div></article>
+              <article class="config-card"><svg class="provider-icon"><use href="#i-github"/></svg><h2>GitHub</h2><p>Import a repository or publish an approved branch.</p><span class="tag neutral">Not connected</span><button class="button secondary full" type="button">Connect GitHub</button></article>
+              <article class="config-card"><svg class="provider-icon"><use href="#i-workspace"/></svg><h2>Local folder</h2><p>Add a folder with an explicit read or write boundary.</p><span class="tag green">Stays on device</span><button class="button secondary full" type="button">Choose folder</button></article>
+            </div>
+          </section>
+
+          <section class="view settings-view" data-view="settings" aria-labelledby="settingsHeading">
+            <div class="page-heading"><div><span class="eyebrow">Five grouped sections</span><h1 id="settingsHeading" data-i18n="settings.title">Settings</h1><p>Common choices first; advanced controls stay out of the way.</p></div><button class="button primary" type="button" id="saveSettings">Save changes</button></div>
+            <div class="settings-layout">
+              <nav class="settings-nav" aria-label="Settings sections">
+                <button class="active" type="button" data-settings-target="general">General</button>
+                <button type="button" data-settings-target="models">Models & providers</button>
+                <button type="button" data-settings-target="deliberation">Deliberation</button>
+                <button type="button" data-settings-target="security">Data & security</button>
+                <button type="button" data-settings-target="advanced">Advanced</button>
+              </nav>
+              <div class="settings-content">
+                <section class="settings-section active" data-settings="general">
+                  <div class="section-heading"><h2>General</h2><p>Language, appearance, notifications, and updates.</p></div>
+                  <article class="setting-group"><h3>Interface language</h3><div class="language-cards">
+                    <button type="button" class="language-card selected" data-language="en"><strong>English</strong><small>English</small></button>
+                    <button type="button" class="language-card" data-language="es"><strong>Español</strong><small>Spanish</small></button>
+                    <button type="button" class="language-card" data-language="fr"><strong>Français</strong><small>French</small></button>
+                    <button type="button" class="language-card" data-language="ar"><strong>العربية</strong><small>Arabic · RTL</small></button>
+                  </div><p class="helper">Interface language is independent from prompt and response language.</p></article>
+                  <article class="setting-group split-setting"><div><h3>Appearance</h3><p>Use the dark theme and comfortable density.</p></div><select><option>Dark · Comfortable</option><option>Dark · Compact</option><option>System</option></select></article>
+                  <article class="setting-group split-setting"><div><h3>Desktop notifications</h3><p>Status only. Prompt and response text are excluded.</p></div><label class="switch"><input type="checkbox" checked><span></span></label></article>
+                </section>
+                <section class="settings-section" data-settings="models">
+                  <div class="section-heading"><h2>Models & providers</h2><p>Connections, authentication, local runtimes, and budgets.</p></div>
+                  <article class="setting-group provider-row"><div><span class="provider-badge">O</span><div><h3>OpenAI</h3><p>API key · Responses protocol</p></div></div><span class="tag green">Connected</span><button class="button secondary">Manage</button></article>
+                  <article class="setting-group provider-row"><div><span class="provider-badge">A</span><div><h3>Anthropic</h3><p>Official device authorization</p></div></div><span class="tag green">Connected</span><button class="button secondary">Manage</button></article>
+                  <article class="setting-group provider-row"><div><span class="provider-badge">L</span><div><h3>Local runtime</h3><p>Ollama · http://127.0.0.1:11434</p></div></div><span class="tag green">Local</span><button class="button secondary">Detect models</button></article>
+                  <article class="setting-group locked-row"><svg><use href="#i-lock"/></svg><div><h3>Provider errors are always contained</h3><p>Raw cross-provider error text cannot be enabled here or in configuration.</p></div></article>
+                </section>
+                <section class="settings-section" data-settings="deliberation">
+                  <div class="section-heading"><h2>Deliberation</h2><p>Chair behavior, phases, clarification, and revision limits.</p></div>
+                  <article class="setting-group form-grid"><label>Chair<select><option>validator</option></select></label><label>Clarification limit<input type="number" value="4" min="0" max="20"></label><label>Model-call budget<input type="number" value="54" min="1"></label><label>Public brief limit<select><option>1,200 characters</option></select></label></article>
+                  <details class="setting-group"><summary>Advanced cycle controls</summary><div class="details-content"><label class="check-row"><input type="checkbox" checked> Run private analyses in parallel</label><label class="check-row"><input type="checkbox" checked> Reserve one full restart cycle</label></div></details>
+                </section>
+                <section class="settings-section" data-settings="security">
+                  <div class="section-heading"><h2>Data & security</h2><p>Storage, disclosure boundaries, audit, and retention.</p></div>
+                  <div class="security-grid">
+                    <article class="setting-group locked-row"><svg><use href="#i-lock"/></svg><div><h3>Private workspaces isolated</h3><p>One agent cannot read another agent's private notes.</p></div></article>
+                    <article class="setting-group locked-row"><svg><use href="#i-lock"/></svg><div><h3>Uploaded content never executed</h3><p>Files remain untrusted context.</p></div></article>
+                    <article class="setting-group locked-row"><svg><use href="#i-lock"/></svg><div><h3>Remote cleartext blocked</h3><p>Only loopback endpoints may use HTTP.</p></div></article>
+                    <article class="setting-group locked-row"><svg><use href="#i-lock"/></svg><div><h3>Hash-chained audit</h3><p>Security events remain verifiable.</p></div></article>
+                  </div>
+                </section>
+                <section class="settings-section" data-settings="advanced">
+                  <div class="section-heading"><h2>Advanced</h2><p>Diagnostics and repair without bypassing safety boundaries.</p></div>
+                  <article class="setting-group split-setting"><div><h3>Diagnostic logging</h3><p>Sanitized metadata only.</p></div><select><option>Standard</option><option>Minimal</option></select></article>
+                  <article class="setting-group split-setting"><div><h3>Experimental features</h3><p>Agent graph inspector and timing overlay.</p></div><button class="button secondary">Review flags</button></article>
+                  <details class="setting-group"><summary>Reset & repair</summary><div class="details-content button-row"><button class="button secondary">Repair application state</button><button class="button danger">Factory reset…</button></div></details>
+                </section>
+              </div>
+            </div>
+          </section>
+        </main>
+      </section>
+    </div>
+
+    <aside class="agent-drawer" id="agentDrawer" aria-hidden="true" aria-label="Private agent chat">
+      <header><div><span class="eyebrow">Isolated conversation</span><h2 id="drawerAgent">discovery</h2></div><button class="icon-button" type="button" id="closeDrawer" aria-label="Close private chat"><svg><use href="#i-close"/></svg></button></header>
+      <div class="isolation-notice"><svg><use href="#i-lock"/></svg><span>Only you and this agent see messages in this panel. Nothing is broadcast to the room.</span></div>
+      <div class="private-thread" id="privateThread">
+        <article><span class="avatar small">DI</span><div><strong>Public brief</strong><p>The cursor structure is controllable, but a forbidden cross-tenant read has not been observed.</p></div></article>
+        <article class="user-private"><div><strong>You</strong><p>What single request would kill or prove this hypothesis?</p></div></article>
+        <article><span class="avatar small">DI</span><div><strong>discovery</strong><p>Replay the captured cursor using a second authorized tenant. Stop at the first response showing either a foreign object or a definitive authorization deny.</p></div></article>
+      </div>
+      <form class="private-composer" id="privateComposer"><textarea rows="3" placeholder="Message this agent privately…"></textarea><button class="button primary" type="submit"><span>Send privately</span><svg><use href="#i-send"/></svg></button></form>
+    </aside>
+    <div class="scrim" id="scrim" hidden></div>
+
+    <dialog id="agentDialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-heading"><div><span class="eyebrow">Team member</span><h2>Add agent</h2></div><button class="icon-button" value="cancel" aria-label="Close"><svg><use href="#i-close"/></svg></button></div>
+        <label>Agent name<input name="name" value="researcher"></label>
+        <label>Provider<select><option>OpenAI</option><option>Anthropic</option><option>Google</option><option>xAI</option><option>OpenRouter</option><option>Local runtime</option><option>Custom endpoint</option></select></label>
+        <label>Model identifier<input name="model" placeholder="Passed to the provider unchanged"></label>
+        <label>Role<textarea name="role" rows="3" placeholder="What should this agent contribute?"></textarea></label>
+        <div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button primary" value="default">Add agent</button></div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js" defer></script>
+  </body>
+</html>
