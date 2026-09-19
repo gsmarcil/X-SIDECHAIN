@@ -4,6 +4,20 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+def cycle_cost(agent_count: int, max_clarification_questions: int) -> int:
+    """Model calls one full cycle costs at worst: 3N + min(Q, N) + 2.
+
+    Private analysis, public brief and peer review per agent, at most one
+    clarification each, then the chair's draft and final result.
+    """
+    return 3 * agent_count + min(max_clarification_questions, agent_count) + 2
+
+
+def default_call_budget(agent_count: int, max_clarification_questions: int) -> int:
+    """The budget when none is configured: one cycle plus two restarts."""
+    return cycle_cost(agent_count, max_clarification_questions) * 3
+
+
 @dataclass(frozen=True)
 class AgentSpec:
     id: str

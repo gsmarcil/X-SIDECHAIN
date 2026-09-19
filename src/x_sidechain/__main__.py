@@ -50,8 +50,13 @@ def _parser() -> argparse.ArgumentParser:
     verify = subcommands.add_parser("verify", help="verify a tamper-evident audit log")
     verify.add_argument("audit_log", metavar="AUDIT.jsonl")
 
-    ui = subcommands.add_parser("ui", help="run the local HTML interface prototype")
+    ui = subcommands.add_parser("ui", help="run the local HTML interface")
     ui.add_argument("--port", type=int, default=8765)
+    ui.add_argument(
+        "--config",
+        metavar="FILE.json",
+        help="load providers and agents so sessions can be started from the interface",
+    )
     ui.add_argument(
         "--no-browser",
         action="store_true",
@@ -145,7 +150,8 @@ def main() -> int:
     args = _parser().parse_args()
     if args.command == "ui":
         try:
-            serve_ui(port=args.port, open_browser=not args.no_browser)
+            ui_config = load_config(args.config) if args.config else None
+            serve_ui(port=args.port, open_browser=not args.no_browser, config=ui_config)
             return 0
         except (OSError, ValueError) as exc:
             print(f"ERROR: {exc}")
