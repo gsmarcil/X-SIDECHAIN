@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=X-SIDECHAIN
+GenericName=Multi-Agent Deliberation
+Comment=Run a chaired deliberation between AI agents, locally and audited
+Exec=x-sidechain ui
+Icon=x-sidechain
+Terminal=false
+Categories=Development;Utility;
+Keywords=agents;deliberation;llm;audit;review;
+StartupNotify=true

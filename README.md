@@ -43,19 +43,45 @@ other model prompts never receive those files. It is not yet a tool-execution sa
 
 ## Install
 
-Requirements: Linux and Python 3.11+.
+Requirements: Linux and Python 3.11+. There are no other runtime dependencies:
+the tool uses the Python standard library only.
+
+**Debian or Ubuntu**
+
+```bash
+sudo dpkg -i x-sidechain_0.5.0_all.deb
+```
+
+This installs the `x-sidechain` command, its manual page, and a desktop entry,
+so the interface can also be started from the applications menu.
+
+**Any distribution, with pipx**
+
+```bash
+pipx install git+https://github.com/gsmarcil/X-SIDECHAIN.git
+```
+
+**From a clone, to work on the code**
 
 ```bash
 git clone https://github.com/gsmarcil/X-SIDECHAIN.git
 cd X-SIDECHAIN
-python3 -m venv .venv
-. .venv/bin/activate
 python -m pip install -e .
-cp x-sidechain.example.json x-sidechain.json
 ```
 
-Edit `x-sidechain.json` to define providers and agents. A model name is passed to
-the provider unchanged; it is not selected from a hard-coded catalog.
+Then create a configuration:
+
+```bash
+mkdir -p ~/.config/x-sidechain
+cp x-sidechain.example.json ~/.config/x-sidechain/config.json
+```
+
+`x-sidechain ui` loads that file when it is started without `--config`, which is
+what the desktop entry does. The `run` command always takes an explicit
+`--config`, so no session starts by accident.
+
+Edit that file to define providers and agents. A model name is passed to the
+provider unchanged; it is not selected from a hard-coded catalog.
 
 ## Run
 
@@ -132,6 +158,16 @@ Email, MFA, consent, and account challenges remain on the provider's official pa
 X-SIDECHAIN never scrapes login pages or reads email. OAuth tokens for generic
 providers are stored through Linux Secret Service using `secret-tool`.
 
+## Build the Debian package
+
+```bash
+./packaging/build-deb.sh          # writes dist/x-sidechain_VERSION_all.deb
+```
+
+The package is architecture independent and depends only on `python3 (>= 3.11)`.
+It carries the command, the interface assets, the manual page, the desktop entry,
+and icons from 16 to 256 pixels.
+
 ## Development and audit verification
 
 ```bash
@@ -147,4 +183,9 @@ See [Architecture](docs/ARCHITECTURE.md),
 - Add sandboxed tools scoped to each agent workspace.
 - Add native streaming and mid-turn steering where providers support it.
 - Add context compaction and richer artifact manifests.
-- Add signed exports, `.deb`, and AppImage artifacts.
+- Add signed exports and an AppImage artifact.
+- Publish to PyPI so `pipx install x-sidechain` works without a git URL.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
