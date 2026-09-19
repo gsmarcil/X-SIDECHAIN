@@ -1,5 +1,5 @@
-/* Connects the page to the local engine. Without a running session it stays out
-   of the way and the prototype content is left exactly as it is.
+/* Connects the page to the local engine. Without a running session it renders
+   only configuration-backed or explicit empty states.
 
    This is a module on purpose: app.js is a classic script, so the two would
    otherwise share one global scope and collide over names such as `toast`. */
@@ -133,6 +133,7 @@ function setRunning(value, label) {
   running = value;
   if (el.runState) el.runState.textContent = label;
   if (el.finish) el.finish.disabled = !value;
+  if (el.hold) el.hold.disabled = !value;
   if (el.chooseTeam) el.chooseTeam.disabled = value;
 }
 
@@ -182,7 +183,152 @@ function initializeTeam(config) {
     chairId = config.chair || config.agents.find((agent) => agent.chair)?.id || config.agents[0]?.id || "";
   }
   renderRoster(config);
+  renderAgentLibrary(config);
   renderProviderSettings(config);
+  renderRuntimeSettings(config);
+}
+
+function appendEmpty(container, message) {
+  const note = document.createElement("p");
+  note.className = "empty-room";
+  note.textContent = message;
+  container.append(note);
+}
+
+function renderAgentLibrary(config) {
+  const library = document.querySelector("#agentLibrary");
+  if (!library) return;
+  library.replaceChildren();
+  if (!Array.isArray(config.agents) || !config.agents.length) {
+    appendEmpty(library, "No agent configuration is loaded.");
+    return;
+  }
+  config.agents.forEach((agent) => {
+    const card = document.createElement("article");
+    card.className = agent.chair ? "config-card featured" : "config-card";
+    const top = document.createElement("div");
+    top.className = "card-top";
+    const avatar = document.createElement("span");
+    avatar.className = "avatar";
+    avatar.textContent = agent.id.slice(0, 2).toUpperCase();
+    const state = document.createElement("span");
+    state.className = agent.chair ? "tag blue" : "tag neutral";
+    state.textContent = agent.chair ? "Chair" : "Member";
+    top.append(avatar, state);
+    const name = document.createElement("h2");
+    name.textContent = agent.id;
+    const role = document.createElement("p");
+    role.textContent = agent.role || "No role description configured.";
+    const facts = document.createElement("dl");
+    for (const [label, value] of [["Provider", agent.provider], ["Model", agent.model]]) {
+      const row = document.createElement("div");
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const detail = document.createElement("dd");
+      detail.textContent = value;
+      row.append(term, detail);
+      facts.append(row);
+    }
+    card.append(top, name, role, facts);
+    library.append(card);
+  });
+}
+
+function setValue(selector, value) {
+  const node = document.querySelector(selector);
+  if (node) node.value = value;
+}
+
+function renderRuntimeSettings(config) {
+  const limits = config.limits || {};
+  setValue("#settingChair", config.chair || "—");
+  setValue("#settingClarifications", String(limits.max_clarification_questions ?? "—"));
+  setValue("#settingCallBudget", String(limits.max_model_calls ?? "—"));
+  setValue("#settingBriefLimit", limits.max_public_brief_chars == null
+    ? "—" : `${limits.max_public_brief_chars} characters`);
+  setValue("#settingRevisionLimit", String(limits.max_revisions ?? "—"));
+  setValue("#settingDeadline", limits.session_deadline_seconds == null
+    ? "—" : `${limits.session_deadline_seconds} seconds`);
+}
+
+function renderSessionList(state) {
+  const rows = document.querySelector("#sessionRows");
+  if (!rows) return;
+  rows.replaceChildren();
+  const hasSession = state && state.status && state.status !== "idle";
+  setText("#sessionCount", hasSession ? "1" : "0");
+  if (!hasSession) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    appendEmpty(cell, "No session has run in this process.");
+    row.append(cell);
+    rows.append(row);
+    return;
+  }
+  const row = document.createElement("tr");
+  const task = document.createElement("td");
+  const title = document.createElement("strong");
+  title.textContent = state.task || "Untitled task";
+  const id = document.createElement("small");
+  id.textContent = state.session_id || "Session id assigned on completion";
+  task.append(title, id);
+  const status = document.createElement("td");
+  const statusTag = document.createElement("span");
+  statusTag.className = state.status === "failed" ? "tag warning" :
+    state.status === "completed" ? "tag green" : "tag blue";
+  statusTag.textContent = state.status;
+  status.append(statusTag);
+  const agents = document.createElement("td");
+  agents.textContent = String(state.agents?.length || 0);
+  const revision = document.createElement("td");
+  revision.textContent = String(state.spend?.revision ?? 0);
+  const audit = document.createElement("td");
+  audit.textContent = state.audit_path ? "Available" : "Pending";
+  row.append(task, status, agents, revision, audit);
+  rows.append(row);
+}
+
+function renderWorkspace(state) {
+  const list = document.querySelector("#workspaceList");
+  if (!list) return;
+  list.replaceChildren();
+  if (!state?.workspace_root) {
+    appendEmpty(list, "No session workspace exists in this process.");
+    return;
+  }
+  const card = document.createElement("article");
+  card.className = "config-card wide-card";
+  const top = document.createElement("div");
+  top.className = "card-top";
+  const heading = document.createElement("div");
+  const tag = document.createElement("span");
+  tag.className = "tag green";
+  tag.textContent = "Created";
+  const title = document.createElement("h2");
+  title.textContent = state.session_id || "Current session";
+  heading.append(tag, title);
+  top.append(heading);
+  const path = document.createElement("p");
+  path.className = "path";
+  path.textContent = state.workspace_root;
+  const audit = document.createElement("p");
+  audit.className = "helper";
+  audit.textContent = state.audit_path ? `Audit: ${state.audit_path}` : "Audit path pending";
+  card.append(top, path, audit);
+  list.append(card);
+}
+
+function renderProcessState(state) {
+  renderSessionList(state);
+  renderWorkspace(state);
+  const auditButton = document.querySelector("#viewAudit");
+  if (auditButton) {
+    auditButton.dataset.auditPath = state?.audit_path || "";
+    auditButton.disabled = !state?.audit_path;
+  }
+  const auditState = document.querySelector("#auditState span:last-child");
+  if (auditState) auditState.textContent = state?.audit_path ? "Audit available" : "No active audit";
 }
 
 function renderProviderSettings(config) {
@@ -209,11 +355,12 @@ function renderProviderSettings(config) {
     const state = document.createElement("span");
     const local = provider.base_url?.startsWith("http://127.0.0.1") ||
       provider.base_url?.startsWith("http://localhost");
+    const accountChecking = provider.auth === "chatgpt_account" && provider.account_checking;
     const accountReady = provider.auth === "chatgpt_account" && provider.account_authenticated;
     const envReady = provider.auth === "api_key" && provider.env_present;
     const ready = accountReady || envReady || provider.auth === "none";
     state.className = ready ? "tag green" : "tag warning";
-    state.textContent = local ? "Local" : ready ? "Connected" :
+    state.textContent = accountChecking ? "Checking…" : local ? "Local" : ready ? "Connected" :
       provider.account_available === false ? "Codex missing" : "Sign in required";
 
     const action = document.createElement("button");
@@ -221,8 +368,9 @@ function renderProviderSettings(config) {
     action.type = "button";
     if (provider.auth === "chatgpt_account") {
       const command = `x-sidechain auth login ${provider.id} --config YOUR_CONFIG.json`;
-      action.textContent = accountReady ? "Account connected" : "Copy login command";
-      action.disabled = accountReady;
+      action.textContent = accountChecking ? "Checking account" :
+        accountReady ? "Account connected" : "Copy login command";
+      action.disabled = accountReady || accountChecking;
       action.addEventListener("click", async () => {
         try { await navigator.clipboard.writeText(command); } catch { /* clipboard may be denied */ }
         toast(command);
@@ -335,6 +483,7 @@ function takeOver(state) {
   state.events.forEach(appendEvent);
   setPhase(state.phase || 1);
   applySpend(state.spend);
+  renderProcessState(state);
   setRunning(state.status === "running", state.status);
 }
 
@@ -362,6 +511,7 @@ function idle(config) {
     usage: {}
   });
   setRunning(false, "Idle");
+  renderProcessState({ status: "idle" });
 }
 
 async function begin(task) {
@@ -418,7 +568,10 @@ function listen() {
   source.addEventListener("state", (message) => takeOver(JSON.parse(message.data)));
   source.addEventListener("room", (message) => {
     appendEvent(JSON.parse(message.data));
-    api.get("/api/state").then((state) => applySpend(state.spend)).catch(() => {});
+    api.get("/api/state").then((state) => {
+      applySpend(state.spend);
+      renderProcessState(state);
+    }).catch(() => {});
   });
   source.addEventListener("progress", (message) => {
     const payload = JSON.parse(message.data);
@@ -432,11 +585,13 @@ function listen() {
     applySpend({ model_calls: payload.model_calls, max_model_calls: payload.model_calls,
                  revision: 0, max_revisions: 0, usage: payload.usage_totals });
     toast(`Session complete — ${payload.model_calls} model calls.`);
+    api.get("/api/state").then(renderProcessState).catch(() => {});
     source.close();
   });
   source.addEventListener("failed", (message) => {
     toast(`Session failed: ${JSON.parse(message.data).error}`);
     setRunning(false, "Failed");
+    api.get("/api/state").then(renderProcessState).catch(() => {});
     source.close();
   });
   source.onerror = () => source.close();
@@ -478,23 +633,21 @@ if (el.finish) {
 
 async function start() {
   if (!token) {
-    /* A hosted visual preview has no local token. Build the team picker from
-       its sample roster while leaving the simulated room behavior intact. */
-    const agents = [...document.querySelectorAll("#agentStrip .agent-chip")].map((chip) => ({
-      id: chip.dataset.agent,
-      provider: "preview",
-      model: chip.querySelector("small")?.textContent || "Preview model",
-      role: chip.classList.contains("chair") ? "Chair" : "Agent",
-      chair: chip.classList.contains("chair")
-    }));
-    if (agents.length) {
-      initializeTeam({ agents, providers: [], chair: agents.find((agent) => agent.chair)?.id || agents[0].id });
-    }
+    setRunning(false, "Offline");
+    if (el.chooseTeam) el.chooseTeam.disabled = true;
+    if (el.prompt) el.prompt.disabled = true;
     return;
   }
   const config = await api.get("/api/config");
-  if (!config.live) return;
+  if (!config.live) {
+    window.__xscLive = true;
+    emptyRoom("No configuration is loaded. Restart the local UI with --config.");
+    setRunning(false, "No configuration");
+    renderProcessState({ status: "idle" });
+    return;
+  }
   initializeTeam(config);
+  pollProviderStatus(config);
   const deadline = config.limits.session_deadline_seconds;
   setText("#spendDeadline", deadline ? `${Math.round(deadline / 60)} min` : "none");
   const state = await api.get("/api/state");
@@ -506,9 +659,19 @@ async function start() {
   }
 }
 
+async function pollProviderStatus(config, attempt = 0) {
+  if (!config.providers?.some((provider) => provider.account_checking) || attempt >= 24) return;
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  try {
+    const refreshed = await api.get("/api/config");
+    liveConfig = refreshed;
+    renderProviderSettings(refreshed);
+    await pollProviderStatus(refreshed, attempt + 1);
+  } catch { /* The main startup/error path reports connectivity failures. */ }
+}
+
 start().catch((error) => {
-  /* A refused token or a dead server is worth saying out loud: silence here
-     looks exactly like the prototype, which is how a real fault hides. */
+  /* A refused token or a dead server is worth saying out loud. */
   console.error("live layer did not start:", error);
   toast(`Live view unavailable: ${error.message}`);
 });

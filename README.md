@@ -93,9 +93,13 @@ page starts a session, streams every public event as it happens, sends a
 correction to the whole room, and closes input — the same chaired workflow the
 `run` command drives, with the same spend and abstentions on screen.
 
-Without `--config` the page still serves, as a static preview that cannot reach
-the engine. The server binds loopback only, refuses a request whose `Host` or
-`Origin` is not this address, and never puts a secret's value in a response:
+Without `--config` the page still serves, but shows an explicit disconnected/empty
+state that cannot reach the engine. With a config, provider status, configured agents,
+the current session, and completed workspace paths come from the local API. Persistent
+history, folder mounting, GitHub connection, file upload, and private agent messaging
+are not available yet and are labelled as such. The server binds loopback only,
+refuses a request whose `Host` or `Origin` is not this address, and never puts a
+secret's value in a response:
 the interface is told a variable's name and whether it is set, nothing more.
 
 ## Authentication

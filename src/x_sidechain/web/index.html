@@ -45,10 +45,10 @@
             <svg><use href="#i-room"/></svg><span data-i18n="nav.room">Room</span>
           </button>
           <button class="nav-item" type="button" data-view-target="sessions" data-tooltip="Sessions">
-            <svg><use href="#i-sessions"/></svg><span data-i18n="nav.sessions">Sessions</span><span class="nav-count">27</span>
+            <svg><use href="#i-sessions"/></svg><span data-i18n="nav.sessions">Sessions</span><span class="nav-count" id="sessionCount">0</span>
           </button>
           <button class="nav-item" type="button" data-view-target="agents" data-tooltip="Agents">
-            <svg><use href="#i-agents"/></svg><span data-i18n="nav.agents">Agents</span><span class="nav-count" id="agentCount">6</span>
+            <svg><use href="#i-agents"/></svg><span data-i18n="nav.agents">Agents</span><span class="nav-count" id="agentCount">0</span>
           </button>
           <button class="nav-item" type="button" data-view-target="workspaces" data-tooltip="Workspaces">
             <svg><use href="#i-workspace"/></svg><span data-i18n="nav.workspaces">Workspaces</span>
@@ -59,7 +59,7 @@
         </nav>
 
         <div class="sidebar-footer">
-          <div class="verified" title="Audit chain verified"><span class="status-dot"></span><span>Chain verified · 18</span></div>
+          <div class="verified" id="auditState" title="No active audit"><span class="status-dot"></span><span>No active audit</span></div>
           <span class="version">v0.4.0 · Linux</span>
         </div>
       </aside>
@@ -67,7 +67,7 @@
       <section class="app-area">
         <header class="topbar">
           <div class="session-identity">
-            <strong id="topTitle">Kernel audit</strong>
+            <strong id="topTitle">No session</strong>
             <span class="privacy-pill"><svg><use href="#i-lock"/></svg> Local only</span>
           </div>
           <div class="top-actions">
@@ -78,12 +78,11 @@
               <option value="ar">العربية</option>
             </select>
             <button class="button secondary" type="button" id="newSession"><svg><use href="#i-plus"/></svg><span data-i18n="action.newSession">New session</span></button>
-            <button class="icon-button" type="button" id="moreActions" aria-label="More session actions"><svg><use href="#i-more"/></svg></button>
+            <button class="icon-button" type="button" id="moreActions" aria-label="More session actions" disabled><svg><use href="#i-more"/></svg></button>
           </div>
           <div class="action-menu" id="actionMenu" hidden>
-            <button type="button">Import session</button>
-            <button type="button">Export sanitized bundle</button>
-            <button type="button">Open audit trail</button>
+            <button type="button" disabled>Session import is not available yet</button>
+            <button type="button" disabled>Session export is not available yet</button>
           </div>
         </header>
 
@@ -91,7 +90,7 @@
           <section class="view active" data-view="room" aria-labelledby="roomHeading">
             <div class="page-heading compact-heading">
               <div>
-                <div class="eyebrow"><span class="live-dot"></span><span id="runState" data-i18n="room.running">Running</span> · revision <span id="revisionNumber">1</span></div>
+                <div class="eyebrow"><span id="runState">Idle</span> · revision <span id="revisionNumber">0</span></div>
                 <h1 id="roomHeading" data-i18n="room.title">Chair room</h1>
               </div>
               <div class="room-actions">
@@ -101,28 +100,16 @@
             </div>
 
             <div class="agent-strip" id="agentStrip" aria-label="Agents in this session">
-              <button class="agent-chip chair" type="button" data-agent="validator">
-                <span class="avatar">VA</span><span><strong>validator</strong><small>Chair · Claude Sonnet</small></span><span class="online-dot"></span>
-              </button>
-              <button class="agent-chip" type="button" data-agent="discovery">
-                <span class="avatar">DI</span><span><strong>discovery</strong><small>Explorer · GPT</small></span><span class="online-dot"></span>
-              </button>
-              <button class="agent-chip" type="button" data-agent="independent">
-                <span class="avatar">IN</span><span><strong>independent</strong><small>Challenger · Grok</small></span><span class="online-dot"></span>
-              </button>
-              <button class="agent-chip" type="button" data-agent="local-reviewer">
-                <span class="avatar">LR</span><span><strong>local-reviewer</strong><small>Local · Qwen</small></span><span class="online-dot local"></span>
-              </button>
               <button class="add-agent" type="button" id="addAgentInline"><svg><use href="#i-agents"/></svg><span data-i18n="action.team">Choose team</span></button>
             </div>
 
             <div class="phase-card">
-              <div class="phase-title"><strong data-i18n="room.workflow">Live deliberation</strong><span id="phaseCounter">phase 4 of 7</span></div>
+              <div class="phase-title"><strong data-i18n="room.workflow">Live deliberation</strong><span id="phaseCounter">phase 1 of 7</span></div>
               <ol class="phase-track" id="phaseTrack">
-                <li class="done"><span>1</span><small>Private work</small></li>
-                <li class="done"><span>2</span><small>Public briefs</small></li>
-                <li class="done"><span>3</span><small>Chair triage</small></li>
-                <li class="current"><span>4</span><small>Clarifications</small></li>
+                <li class="current"><span>1</span><small>Private work</small></li>
+                <li><span>2</span><small>Public briefs</small></li>
+                <li><span>3</span><small>Chair triage</small></li>
+                <li><span>4</span><small>Clarifications</small></li>
                 <li><span>5</span><small>Chair draft</small></li>
                 <li><span>6</span><small>Peer review</small></li>
                 <li><span>7</span><small>Final result</small></li>
@@ -132,21 +119,7 @@
             <div class="room-grid">
               <div class="conversation-column">
                 <div class="event-list" id="eventList" aria-live="polite">
-                  <article class="event-card chair-event">
-                    <div class="event-meta"><span class="avatar small">VA</span><strong>validator</strong><span class="tag">CHAIR</span><time>10:14</time></div>
-                    <p>You decoded the cursor. Did any captured response return a row owned by another tenant, or is the result still inference?</p>
-                    <div class="event-foot"><span class="tag warning">Blocks verdict</span><span>Directed to discovery</span></div>
-                  </article>
-                  <button class="event-card summary-event" type="button" data-open-agent="discovery">
-                    <div class="event-meta"><span class="avatar small">DI</span><strong>discovery</strong><span class="tag blue">PUBLIC BRIEF</span><time>10:16</time></div>
-                    <p><b>CLAIM:</b> The export cursor is opaque but not proven tenant-bound. <b>EVIDENCE:</b> it decodes to a tenant and offset pair. <b>STOP:</b> a foreign-row response or a definitive authorization deny.</p>
-                    <div class="event-foot"><span class="tag warning">Uncertainty: medium</span><span class="open-private">Open private chat →</span></div>
-                  </button>
-                  <button class="event-card summary-event" type="button" data-open-agent="independent">
-                    <div class="event-meta"><span class="avatar small">IN</span><strong>independent</strong><span class="tag blue">PUBLIC BRIEF</span><time>10:17</time></div>
-                    <p><b>CLAIM:</b> The current artifact proves controllable cursor structure only. <b>FASTEST PATH:</b> replay the cursor under a second authorized tenant and record the first allow or deny.</p>
-                    <div class="event-foot"><span class="tag neutral">Needs validation</span><span class="open-private">Open private chat →</span></div>
-                  </button>
+                  <p class="empty-room">Connect to the local engine to load the current session.</p>
                 </div>
 
                 <form class="composer" id="composer">
@@ -167,11 +140,11 @@
               <aside class="session-panel" aria-label="Session summary">
                 <div class="panel-heading"><strong data-i18n="room.session">Session</strong><span class="tag green">Bounded</span></div>
                 <dl class="metrics">
-                  <div><dt>Quorum</dt><dd id="spendQuorum">4 of 5</dd></div>
-                  <div><dt>Model calls</dt><dd id="spendCalls">18 / 54</dd></div>
-                  <div><dt>Tokens</dt><dd id="spendTokens">42.8k</dd></div>
-                  <div><dt>Deadline</dt><dd id="spendDeadline">42 min</dd></div>
-                  <div><dt>Restarts</dt><dd id="spendRevisions">1 available</dd></div>
+                  <div><dt>Quorum</dt><dd id="spendQuorum">0 agents</dd></div>
+                  <div><dt>Model calls</dt><dd id="spendCalls">0 / —</dd></div>
+                  <div><dt>Tokens</dt><dd id="spendTokens">—</dd></div>
+                  <div><dt>Deadline</dt><dd id="spendDeadline">—</dd></div>
+                  <div><dt>Restarts</dt><dd id="spendRevisions">—</dd></div>
                 </dl>
                 <div class="budget-bar"><span id="budgetBar"></span></div>
                 <div class="guard-list">
@@ -185,38 +158,28 @@
           </section>
 
           <section class="view" data-view="sessions" aria-labelledby="sessionsHeading">
-            <div class="page-heading"><div><span class="eyebrow">27 local sessions</span><h1 id="sessionsHeading" data-i18n="sessions.title">Sessions</h1><p>Resume work, inspect results, or verify an audit chain.</p></div><button class="button primary" type="button"><svg><use href="#i-plus"/></svg>New session</button></div>
-            <div class="toolbar"><label class="search-box"><svg><use href="#i-search"/></svg><input type="search" placeholder="Search sessions"></label><select><option>All states</option><option>Running</option><option>Complete</option><option>Failed</option></select></div>
+            <div class="page-heading"><div><span class="eyebrow">Current process</span><h1 id="sessionsHeading" data-i18n="sessions.title">Sessions</h1><p>The current build keeps one in-memory session. Persistent history is not available yet.</p></div></div>
             <div class="table-card">
-              <table><thead><tr><th>Session</th><th>Status</th><th>Agents</th><th>Updated</th><th>Audit</th></tr></thead><tbody>
-                <tr><td><strong>Kernel audit</strong><small>Cursor tenant isolation</small></td><td><span class="tag blue">Running</span></td><td>5</td><td>Now</td><td><span class="tag green">Verified</span></td></tr>
-                <tr><td><strong>API boundary review</strong><small>Foreign object access</small></td><td><span class="tag green">Complete</span></td><td>4</td><td>Yesterday</td><td><span class="tag green">Verified</span></td></tr>
-                <tr><td><strong>Provider comparison</strong><small>Contradiction analysis</small></td><td><span class="tag neutral">Held</span></td><td>3</td><td>3 days ago</td><td><span class="tag green">Verified</span></td></tr>
-              </tbody></table>
+              <table><thead><tr><th>Task</th><th>Status</th><th>Agents</th><th>Revision</th><th>Audit</th></tr></thead><tbody id="sessionRows"><tr><td colspan="5"><p class="empty-room">No session has run in this process.</p></td></tr></tbody></table>
             </div>
           </section>
 
           <section class="view" data-view="agents" aria-labelledby="agentsHeading">
-            <div class="page-heading"><div><span class="eyebrow">Reusable team</span><h1 id="agentsHeading" data-i18n="agents.title">Agents</h1><p>Assign roles without limiting provider or model choice.</p></div><button class="button primary" type="button" id="addAgentButton"><svg><use href="#i-plus"/></svg>Add agent</button></div>
-            <div class="cards-grid agent-library">
-              <article class="config-card featured"><div class="card-top"><span class="avatar">VA</span><span class="tag blue">Chair</span></div><h2>validator</h2><p>Challenges unsupported claims and controls clarification.</p><dl><div><dt>Provider</dt><dd>Anthropic</dd></div><div><dt>Model</dt><dd>Claude Sonnet</dd></div></dl><button class="button secondary full" type="button">Edit agent</button></article>
-              <article class="config-card"><div class="card-top"><span class="avatar">DI</span><span class="online-dot"></span></div><h2>discovery</h2><p>Expands the attack surface and identifies observable artifacts.</p><dl><div><dt>Provider</dt><dd>OpenAI</dd></div><div><dt>Model</dt><dd>GPT</dd></div></dl><button class="button secondary full" type="button">Edit agent</button></article>
-              <article class="config-card"><div class="card-top"><span class="avatar">IN</span><span class="online-dot"></span></div><h2>independent</h2><p>Searches for an independent path and shared assumptions.</p><dl><div><dt>Provider</dt><dd>xAI</dd></div><div><dt>Model</dt><dd>Grok</dd></div></dl><button class="button secondary full" type="button">Edit agent</button></article>
-              <article class="config-card"><div class="card-top"><span class="avatar">LR</span><span class="tag green">Local</span></div><h2>local-reviewer</h2><p>Reviews sensitive material without sending it off-device.</p><dl><div><dt>Runtime</dt><dd>Ollama</dd></div><div><dt>Model</dt><dd>Qwen</dd></div></dl><button class="button secondary full" type="button">Edit agent</button></article>
+            <div class="page-heading"><div><span class="eyebrow">Loaded configuration</span><h1 id="agentsHeading" data-i18n="agents.title">Agents</h1><p>These agents come directly from the active configuration file. Editing is command-line only in this build.</p></div></div>
+            <div class="cards-grid agent-library" id="agentLibrary">
+              <p class="empty-room">No agent configuration is loaded.</p>
             </div>
           </section>
 
           <section class="view" data-view="workspaces" aria-labelledby="workspacesHeading">
-            <div class="page-heading"><div><span class="eyebrow">Local-first context</span><h1 id="workspacesHeading" data-i18n="workspaces.title">Workspaces</h1><p>Control exactly which files and repositories enter a session.</p></div><button class="button primary" type="button"><svg><use href="#i-plus"/></svg>Add workspace</button></div>
-            <div class="workspace-layout">
-              <article class="config-card wide-card"><div class="card-top"><div><span class="tag green">Mounted</span><h2>Kernel audit</h2></div><button class="icon-button"><svg><use href="#i-more"/></svg></button></div><p class="path">~/research/linux-dwc2</p><div class="workspace-stats"><span>1,284 files</span><span>218 MB</span><span>Read only</span></div><div class="guard-list horizontal"><div><svg><use href="#i-lock"/></svg>Path boundary enforced</div><div><svg><use href="#i-lock"/></svg>Files never executed</div></div></article>
-              <article class="config-card"><svg class="provider-icon"><use href="#i-github"/></svg><h2>GitHub</h2><p>Import a repository or publish an approved branch.</p><span class="tag neutral">Not connected</span><button class="button secondary full" type="button">Connect GitHub</button></article>
-              <article class="config-card"><svg class="provider-icon"><use href="#i-workspace"/></svg><h2>Local folder</h2><p>Add a folder with an explicit read or write boundary.</p><span class="tag green">Stays on device</span><button class="button secondary full" type="button">Choose folder</button></article>
+            <div class="page-heading"><div><span class="eyebrow">Session artifacts</span><h1 id="workspacesHeading" data-i18n="workspaces.title">Workspaces</h1><p>A completed run exposes its real workspace and audit paths here. Folder mounting and GitHub connection are not wired yet.</p></div></div>
+            <div class="workspace-layout" id="workspaceList">
+              <p class="empty-room">No session workspace exists in this process.</p>
             </div>
           </section>
 
           <section class="view settings-view" data-view="settings" aria-labelledby="settingsHeading">
-            <div class="page-heading"><div><span class="eyebrow">Five grouped sections</span><h1 id="settingsHeading" data-i18n="settings.title">Settings</h1><p>Common choices first; advanced controls stay out of the way.</p></div><button class="button primary" type="button" id="saveSettings">Save changes</button></div>
+            <div class="page-heading"><div><span class="eyebrow">Runtime truth</span><h1 id="settingsHeading" data-i18n="settings.title">Settings</h1><p>Language is stored on this device. Runtime values below are read from the active configuration.</p></div></div>
             <div class="settings-layout">
               <nav class="settings-nav" aria-label="Settings sections">
                 <button class="active" type="button" data-settings-target="general">General</button>
@@ -227,29 +190,25 @@
               </nav>
               <div class="settings-content">
                 <section class="settings-section active" data-settings="general">
-                  <div class="section-heading"><h2>General</h2><p>Language, appearance, notifications, and updates.</p></div>
+                  <div class="section-heading"><h2>General</h2><p>Settings that are currently implemented by the interface.</p></div>
                   <article class="setting-group"><h3>Interface language</h3><div class="language-cards">
                     <button type="button" class="language-card selected" data-language="en"><strong>English</strong><small>English</small></button>
                     <button type="button" class="language-card" data-language="es"><strong>Español</strong><small>Spanish</small></button>
                     <button type="button" class="language-card" data-language="fr"><strong>Français</strong><small>French</small></button>
                     <button type="button" class="language-card" data-language="ar"><strong>العربية</strong><small>Arabic · RTL</small></button>
                   </div><p class="helper">Interface language is independent from prompt and response language.</p></article>
-                  <article class="setting-group split-setting"><div><h3>Appearance</h3><p>Use the dark theme and comfortable density.</p></div><select><option>Dark · Comfortable</option><option>Dark · Compact</option><option>System</option></select></article>
-                  <article class="setting-group split-setting"><div><h3>Desktop notifications</h3><p>Status only. Prompt and response text are excluded.</p></div><label class="switch"><input type="checkbox" checked><span></span></label></article>
+                  <article class="setting-group locked-row"><svg><use href="#i-lock"/></svg><div><h3>Theme</h3><p>The current release ships one dark, comfortable theme.</p></div></article>
                 </section>
                 <section class="settings-section" data-settings="models">
                   <div class="section-heading"><h2>Models & providers</h2><p>Connections, authentication, local runtimes, and budgets.</p></div>
                   <div id="providerSettingsList">
-                    <article class="setting-group provider-row"><div><span class="provider-badge">O</span><div><h3>OpenAI</h3><p>ChatGPT account or API key</p></div></div><span class="tag neutral">Preview</span><button class="button secondary" type="button">Manage</button></article>
-                    <article class="setting-group provider-row"><div><span class="provider-badge">A</span><div><h3>Anthropic</h3><p>Official provider authentication</p></div></div><span class="tag neutral">Preview</span><button class="button secondary" type="button">Manage</button></article>
-                    <article class="setting-group provider-row"><div><span class="provider-badge">L</span><div><h3>Local runtime</h3><p>Ollama · loopback endpoint</p></div></div><span class="tag green">Local</span><button class="button secondary" type="button">Detect models</button></article>
+                    <p class="empty-room">No provider configuration is loaded.</p>
                   </div>
                   <article class="setting-group locked-row"><svg><use href="#i-lock"/></svg><div><h3>Provider errors are always contained</h3><p>Raw cross-provider error text cannot be enabled here or in configuration.</p></div></article>
                 </section>
                 <section class="settings-section" data-settings="deliberation">
                   <div class="section-heading"><h2>Deliberation</h2><p>Chair behavior, phases, clarification, and revision limits.</p></div>
-                  <article class="setting-group form-grid"><label>Chair<select><option>validator</option></select></label><label>Clarification limit<input type="number" value="4" min="0" max="20"></label><label>Model-call budget<input type="number" value="54" min="1"></label><label>Public brief limit<select><option>1,200 characters</option></select></label></article>
-                  <details class="setting-group"><summary>Advanced cycle controls</summary><div class="details-content"><label class="check-row"><input type="checkbox" checked> Run private analyses in parallel</label><label class="check-row"><input type="checkbox" checked> Reserve one full restart cycle</label></div></details>
+                  <article class="setting-group form-grid"><label>Chair<input id="settingChair" value="—" readonly></label><label>Clarification limit<input id="settingClarifications" value="—" readonly></label><label>Model-call budget<input id="settingCallBudget" value="—" readonly></label><label>Public brief limit<input id="settingBriefLimit" value="—" readonly></label><label>Revision limit<input id="settingRevisionLimit" value="—" readonly></label><label>Session deadline<input id="settingDeadline" value="—" readonly></label></article>
                 </section>
                 <section class="settings-section" data-settings="security">
                   <div class="section-heading"><h2>Data & security</h2><p>Storage, disclosure boundaries, audit, and retention.</p></div>
@@ -261,10 +220,8 @@
                   </div>
                 </section>
                 <section class="settings-section" data-settings="advanced">
-                  <div class="section-heading"><h2>Advanced</h2><p>Diagnostics and repair without bypassing safety boundaries.</p></div>
-                  <article class="setting-group split-setting"><div><h3>Diagnostic logging</h3><p>Sanitized metadata only.</p></div><select><option>Standard</option><option>Minimal</option></select></article>
-                  <article class="setting-group split-setting"><div><h3>Experimental features</h3><p>Agent graph inspector and timing overlay.</p></div><button class="button secondary">Review flags</button></article>
-                  <details class="setting-group"><summary>Reset & repair</summary><div class="details-content button-row"><button class="button secondary">Repair application state</button><button class="button danger">Factory reset…</button></div></details>
+                  <div class="section-heading"><h2>Advanced</h2><p>No advanced UI controls are implemented in this build.</p></div>
+                  <article class="setting-group locked-row"><svg><use href="#i-lock"/></svg><div><h3>Configuration file is authoritative</h3><p>Use the CLI validator after changing providers, agents, or limits.</p></div></article>
                 </section>
               </div>
             </div>
@@ -274,27 +231,14 @@
     </div>
 
     <aside class="agent-drawer" id="agentDrawer" aria-hidden="true" aria-label="Private agent chat">
-      <header><div><span class="eyebrow">Isolated conversation</span><h2 id="drawerAgent">discovery</h2></div><button class="icon-button" type="button" id="closeDrawer" aria-label="Close private chat"><svg><use href="#i-close"/></svg></button></header>
-      <div class="isolation-notice"><svg><use href="#i-lock"/></svg><span>Only you and this agent see messages in this panel. Nothing is broadcast to the room.</span></div>
+      <header><div><span class="eyebrow">Agent details</span><h2 id="drawerAgent">Agent</h2></div><button class="icon-button" type="button" id="closeDrawer" aria-label="Close agent panel"><svg><use href="#i-close"/></svg></button></header>
+      <div class="isolation-notice"><svg><use href="#i-lock"/></svg><span>Private agent messaging is not connected in this build.</span></div>
       <div class="private-thread" id="privateThread">
-        <article><span class="avatar small">DI</span><div><strong>Public brief</strong><p>The cursor structure is controllable, but a forbidden cross-tenant read has not been observed.</p></div></article>
-        <article class="user-private"><div><strong>You</strong><p>What single request would kill or prove this hypothesis?</p></div></article>
-        <article><span class="avatar small">DI</span><div><strong>discovery</strong><p>Replay the captured cursor using a second authorized tenant. Stop at the first response showing either a foreign object or a definitive authorization deny.</p></div></article>
+        <p class="empty-room">No private messages are available.</p>
       </div>
-      <form class="private-composer" id="privateComposer"><textarea rows="3" placeholder="Message this agent privately…"></textarea><button class="button primary" type="submit"><span>Send privately</span><svg><use href="#i-send"/></svg></button></form>
+      <form class="private-composer" id="privateComposer"><textarea rows="3" placeholder="Private messaging is not available" disabled></textarea><button class="button primary" type="submit" disabled><span>Unavailable</span><svg><use href="#i-send"/></svg></button></form>
     </aside>
     <div class="scrim" id="scrim" hidden></div>
-
-    <dialog id="agentDialog">
-      <form method="dialog" class="dialog-card">
-        <div class="dialog-heading"><div><span class="eyebrow">Team member</span><h2>Add agent</h2></div><button class="icon-button" value="cancel" aria-label="Close"><svg><use href="#i-close"/></svg></button></div>
-        <label>Agent name<input name="name" value="researcher"></label>
-        <label>Provider<select><option>OpenAI</option><option>Anthropic</option><option>Google</option><option>xAI</option><option>OpenRouter</option><option>Local runtime</option><option>Custom endpoint</option></select></label>
-        <label>Model identifier<input name="model" placeholder="Passed to the provider unchanged"></label>
-        <label>Role<textarea name="role" rows="3" placeholder="What should this agent contribute?"></textarea></label>
-        <div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button primary" value="default">Add agent</button></div>
-      </form>
-    </dialog>
 
     <dialog id="sessionSetupDialog">
       <form class="dialog-card" id="sessionSetupForm">

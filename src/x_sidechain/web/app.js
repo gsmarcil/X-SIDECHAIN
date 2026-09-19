@@ -9,7 +9,7 @@ const translations = {
     "sessions.title": "Sessions", "agents.title": "Agents", "workspaces.title": "Workspaces", "settings.title": "Settings",
     "team.eyebrow": "Next session", "team.title": "Choose the team", "team.help": "Select at least two agents and choose one participating agent as chair.", "team.chair": "Chair", "team.cancel": "Cancel", "team.confirm": "Use this team",
     promptPlaceholder: "Add a fact, correction, or decisive artifact…", openSidebar: "Expand sidebar", closeSidebar: "Collapse sidebar",
-    sent: "Correction sent. A new revision has started.", held: "Room input is held.", resumed: "Room input resumed.", finished: "Demo session finished.", saved: "Settings saved on this device."
+    sent: "Correction sent. A new revision has started.", held: "Room input is held.", resumed: "Room input resumed.", finished: "Session finished.", saved: "Settings saved on this device."
   },
   es: {
     "nav.room": "Sala", "nav.sessions": "Sesiones", "nav.agents": "Agentes", "nav.workspaces": "Espacios", "nav.settings": "Ajustes",
@@ -19,7 +19,7 @@ const translations = {
     "sessions.title": "Sesiones", "agents.title": "Agentes", "workspaces.title": "Espacios de trabajo", "settings.title": "Ajustes",
     "team.eyebrow": "Próxima sesión", "team.title": "Elegir el equipo", "team.help": "Selecciona al menos dos agentes y elige un coordinador entre ellos.", "team.chair": "Coordinador", "team.cancel": "Cancelar", "team.confirm": "Usar este equipo",
     promptPlaceholder: "Añade un hecho, corrección o prueba decisiva…", openSidebar: "Expandir barra lateral", closeSidebar: "Contraer barra lateral",
-    sent: "Corrección enviada. Ha comenzado una nueva revisión.", held: "La entrada de la sala está pausada.", resumed: "La entrada de la sala se ha reanudado.", finished: "La sesión de demostración ha finalizado.", saved: "Ajustes guardados en este dispositivo."
+    sent: "Corrección enviada. Ha comenzado una nueva revisión.", held: "La entrada de la sala está pausada.", resumed: "La entrada de la sala se ha reanudado.", finished: "La sesión ha finalizado.", saved: "Ajustes guardados en este dispositivo."
   },
   fr: {
     "nav.room": "Salle", "nav.sessions": "Sessions", "nav.agents": "Agents", "nav.workspaces": "Espaces", "nav.settings": "Paramètres",
@@ -62,7 +62,7 @@ const drawer = document.querySelector("#agentDrawer");
 const scrim = document.querySelector("#scrim");
 const toast = document.querySelector("#toast");
 let currentLanguage = storage.get("xsc-language", "en");
-let currentPhase = 4;
+let currentPhase = 1;
 let held = false;
 let toastTimer;
 
@@ -189,18 +189,7 @@ document.querySelectorAll("[data-language]").forEach((button) => button.addEvent
 document.querySelector("#composer").addEventListener("submit", (event) => {
   event.preventDefault();
   if (window.__xscLive) return;
-  const message = promptInput.value.trim();
-  if (!message || held) {
-    if (held) showToast(t("held"));
-    return;
-  }
-  eventList.append(createCorrectionEvent(message));
-  promptInput.value = "";
-  document.querySelector("#fileChips").replaceChildren();
-  setPhase(1);
-  eventList.lastElementChild.scrollIntoView({behavior: "smooth", block: "center"});
-  showToast(t("sent"));
-  window.setTimeout(() => setPhase(2), 900);
+  showToast("Open this page through the local X-SIDECHAIN server to run a session.");
 });
 
 document.querySelector("#holdButton").addEventListener("click", (event) => {
@@ -212,11 +201,7 @@ document.querySelector("#holdButton").addEventListener("click", (event) => {
 
 document.querySelector("#finishButton").addEventListener("click", () => {
   if (window.__xscLive) return;
-  setPhase(7);
-  document.querySelector("#runState").textContent = currentLanguage === "ar" ? "اكتملت" : "Complete";
-  document.querySelector("#runState").previousElementSibling?.classList.remove("live-dot");
-  promptInput.disabled = true;
-  showToast(t("finished"));
+  showToast("No live session is running.");
 });
 
 const fileInput = document.querySelector("#fileInput");
@@ -234,44 +219,21 @@ fileInput.addEventListener("change", () => {
 
 document.querySelector("#privateComposer").addEventListener("submit", (event) => {
   event.preventDefault();
-  const input = event.currentTarget.querySelector("textarea");
-  const message = input.value.trim();
-  if (!message) return;
-  const article = document.createElement("article");
-  article.className = "user-private";
-  const bubble = document.createElement("div");
-  const author = document.createElement("strong");
-  author.textContent = currentLanguage === "ar" ? "أنت" : "You";
-  const content = document.createElement("p");
-  content.textContent = message;
-  bubble.append(author, content);
-  article.append(bubble);
-  document.querySelector("#privateThread").append(article);
-  input.value = "";
-  article.scrollIntoView({behavior: "smooth"});
+  showToast("Private agent messaging is not connected in this build.");
 });
 
-const dialog = document.querySelector("#agentDialog");
-document.querySelectorAll("#addAgentButton, #addAgentInline").forEach((button) => button.addEventListener("click", () => dialog.showModal()));
-dialog.addEventListener("close", () => {
-  if (dialog.returnValue === "default") showToast("Agent draft added to the local team.");
+document.querySelector("#viewAudit").addEventListener("click", (event) => {
+  const path = event.currentTarget.dataset.auditPath;
+  showToast(path ? `Audit: ${path}` : "An audit path appears after a completed session.");
 });
-
-document.querySelector("#saveSettings").addEventListener("click", () => showToast(t("saved")));
-document.querySelector("#viewAudit").addEventListener("click", () => showToast("Audit chain verified: 18 records."));
 document.querySelector("#newSession").addEventListener("click", () => {
   selectView("room");
-  promptInput.disabled = false;
-  held = false;
-  setPhase(1);
-  document.querySelector("#runState").textContent = t("room.running");
   promptInput.focus();
-  showToast("New local draft ready.");
 });
 
 const moreButton = document.querySelector("#moreActions");
 const actionMenu = document.querySelector("#actionMenu");
-moreButton.addEventListener("click", () => { actionMenu.hidden = !actionMenu.hidden; });
+moreButton.addEventListener("click", () => { if (!moreButton.disabled) actionMenu.hidden = !actionMenu.hidden; });
 document.addEventListener("click", (event) => {
   if (!actionMenu.contains(event.target) && !moreButton.contains(event.target)) actionMenu.hidden = true;
 });

@@ -39,6 +39,11 @@ the filesystem directly. Future tools must be confined to the owning agent direc
 - ChatGPT account credentials are owned by the official Codex CLI. X-SIDECHAIN
   calls `codex login` and `codex login status`; it never reads or copies the Codex
   credential file.
+- Every Codex child receives an explicit allowlisted environment containing only
+  process, account-store, locale, certificate, proxy, and desktop-login necessities.
+  Provider API keys—including `OPENAI_API_KEY`—and arbitrary configured secret
+  variables are never inherited by Codex. This also prevents an account-backed
+  provider from silently switching to API-key billing because of the parent process.
 - Account-backed model calls use an empty temporary working directory, ephemeral
   sessions, read-only sandboxing, ignored user configuration and execution rules,
   and disabled shell, search, image, memory, skill, and multi-agent tools. Only the

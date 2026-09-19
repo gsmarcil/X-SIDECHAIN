@@ -11,6 +11,7 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+from x_sidechain.auth import CodexAccountStatus, CodexAccountStatusCache
 from x_sidechain.config import load_config
 from x_sidechain.models import ModelReply
 from x_sidechain.ui import LiveSession, SessionManager, build_ui_server, phase_of
@@ -142,11 +143,13 @@ class ConfigReportTests(unittest.TestCase):
         "max_clarification_questions": 4,
     }
 
-    def _describe(self, raw: dict) -> dict:
+    def _describe(self, raw: dict, *, status_cache=None) -> dict:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.json"
             path.write_text(json.dumps(raw), encoding="utf-8")
-            return SessionManager(load_config(path)).describe_config()
+            return SessionManager(
+                load_config(path), codex_status_cache=status_cache
+            ).describe_config()
 
     def test_an_unset_budget_is_reported_as_the_one_a_run_will_use(self) -> None:
         limits = self._describe(self.RAW)["limits"]
@@ -174,16 +177,52 @@ class ConfigReportTests(unittest.TestCase):
         status = type(
             "Status",
             (),
-            {"available": True, "authenticated": True, "method": "chatgpt"},
+            {"available": True, "authenticated": True, "method": "chatgpt", "checking": False},
         )()
-        with unittest.mock.patch("x_sidechain.ui.codex_account_status", return_value=status):
-            provider = self._describe(raw)["providers"][0]
+        cache = unittest.mock.Mock()
+        cache.get.return_value = status
+        provider = self._describe(raw, status_cache=cache)["providers"][0]
         self.assertTrue(provider["account_available"])
         self.assertTrue(provider["account_authenticated"])
         self.assertEqual(provider["account_method"], "chatgpt")
         self.assertNotIn("access_token", provider)
         self.assertNotIn("refresh_token", provider)
         self.assertNotIn("credential", provider)
+
+    def test_repeated_config_reads_share_one_nonblocking_codex_status_check(self) -> None:
+        raw = {**self.RAW}
+        raw["providers"] = {
+            "p": {"protocol": "codex_cli", "auth": {"type": "chatgpt_account"}}
+        }
+        started = threading.Event()
+        release = threading.Event()
+        calls = 0
+
+        def slow_status() -> CodexAccountStatus:
+            nonlocal calls
+            calls += 1
+            started.set()
+            release.wait(timeout=2)
+            return CodexAccountStatus(True, True, "chatgpt")
+
+        cache = CodexAccountStatusCache(
+            checker=slow_status,
+            availability_checker=lambda: True,
+            ttl_seconds=30,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            manager = SessionManager(load_config(path), codex_status_cache=cache)
+            before = time.monotonic()
+            replies = [manager.describe_config() for _ in range(3)]
+            elapsed = time.monotonic() - before
+
+        self.assertTrue(started.wait(timeout=1))
+        self.assertLess(elapsed, 0.2)
+        self.assertEqual(calls, 1)
+        self.assertTrue(all(reply["providers"][0]["account_checking"] for reply in replies))
+        release.set()
 
 
 class SessionSelectionTests(unittest.TestCase):
@@ -269,6 +308,21 @@ class FinishedSessionTests(ServedUITestCase):
 
 
 class WebAssetTests(unittest.TestCase):
+    def test_shipped_page_contains_no_fictional_session_or_workspace_data(self) -> None:
+        page = (WEB / "index.html").read_text(encoding="utf-8")
+        for invented in (
+            "Kernel audit",
+            "Cursor tenant isolation",
+            "API boundary review",
+            "~/research/linux-dwc2",
+            "1,284 files",
+            "27 local sessions",
+        ):
+            self.assertNotIn(invented, page)
+        self.assertIn('id="sessionRows"', page)
+        self.assertIn('id="agentLibrary"', page)
+        self.assertIn('id="workspaceList"', page)
+
     def test_the_live_layer_is_a_module(self) -> None:
         # app.js is a classic script: sharing one global scope with it made the
         # live layer die on a duplicate declaration before its first statement.

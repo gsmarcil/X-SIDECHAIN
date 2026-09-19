@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from x_sidechain.auth import CodexAccountStatus, codex_account_status
+from x_sidechain.auth import CodexAccountStatus, codex_account_status, codex_subprocess_env
 from x_sidechain.config import ProviderConfig
 from x_sidechain.http import MAX_ERROR_BYTES, MAX_RESPONSE_BYTES, ProviderHTTPError, scrub
 from x_sidechain.models import ModelReply
@@ -87,6 +87,7 @@ class CodexCLIProvider:
                         cwd=root,
                         check=False,
                         timeout=self._timeout,
+                        env=codex_subprocess_env(),
                     )
             except subprocess.TimeoutExpired as exc:
                 raise ProviderHTTPError(
