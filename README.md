@@ -66,8 +66,13 @@ pipx install git+https://github.com/gsmarcil/X-SIDECHAIN.git
 ```bash
 git clone https://github.com/gsmarcil/X-SIDECHAIN.git
 cd X-SIDECHAIN
-python -m pip install -e .
+./install.sh
 ```
+
+The script checks the prerequisites, builds `.venv`, installs the package, and
+verifies the result. It asks for no privileges and installs no system packages.
+[INSTALL.md](INSTALL.md) covers the options, a step-by-step manual install, and
+what to do when something fails.
 
 Then create a configuration:
 
