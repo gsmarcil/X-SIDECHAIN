@@ -79,6 +79,22 @@ The command prints the final result plus two paths:
 - `workspace_root`: private analyses, public briefs, clarifications, draft, reviews,
   and final result, grouped by revision and agent.
 
+## Local interface
+
+```bash
+x-sidechain ui --config x-sidechain.json
+```
+
+The command prints a loopback address carrying a one-off token and opens it. The
+page starts a session, streams every public event as it happens, sends a
+correction to the whole room, and closes input — the same chaired workflow the
+`run` command drives, with the same spend and abstentions on screen.
+
+Without `--config` the page still serves, as a static preview that cannot reach
+the engine. The server binds loopback only, refuses a request whose `Host` or
+`Origin` is not this address, and never puts a secret's value in a response:
+the interface is told a variable's name and whether it is set, nothing more.
+
 ## Authentication
 
 `api_key` reads a secret from the configured environment variable. `none` is for
@@ -108,5 +124,4 @@ See [Architecture](docs/ARCHITECTURE.md),
 - Add sandboxed tools scoped to each agent workspace.
 - Add native streaming and mid-turn steering where providers support it.
 - Add context compaction and richer artifact manifests.
-- Build the Linux UI on the stable chaired-workflow event stream.
 - Add signed exports, `.deb`, and AppImage artifacts.

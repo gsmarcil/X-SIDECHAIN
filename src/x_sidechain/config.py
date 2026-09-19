@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from x_sidechain.models import AgentSpec
+from x_sidechain.models import AgentSpec, cycle_cost
 from x_sidechain.workspace import validate_agent_id
 
 
@@ -248,7 +248,7 @@ def load_config(path: str | Path) -> RunConfig:
     if max_calls_raw is not None:
         if not isinstance(max_calls_raw, int) or isinstance(max_calls_raw, bool):
             raise ValueError("max_model_calls must be an integer")
-        minimum_calls = 3 * len(agents) + min(clarification_raw, len(agents)) + 2
+        minimum_calls = cycle_cost(len(agents), clarification_raw)
         if max_calls_raw < minimum_calls:
             raise ValueError(
                 f"max_model_calls must be at least {minimum_calls} for this configuration"

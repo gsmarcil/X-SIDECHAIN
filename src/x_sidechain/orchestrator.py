@@ -11,7 +11,14 @@ from typing import Callable
 
 from x_sidechain.audit import AuditLog
 from x_sidechain.http import ProviderHTTPError
-from x_sidechain.models import AgentSpec, DiscussionEvent, DiscussionResult, ModelReply
+from x_sidechain.models import (
+    AgentSpec,
+    DiscussionEvent,
+    DiscussionResult,
+    ModelReply,
+    cycle_cost,
+    default_call_budget,
+)
 from x_sidechain.prompts import (
     chair_draft_prompt,
     chair_questions_prompt,
@@ -174,9 +181,11 @@ class SidechainOrchestrator:
             raise ValueError("chair_id must reference an agent")
         if max_clarification_questions < 0 or max_clarification_questions > 20:
             raise ValueError("max_clarification_questions must be between 0 and 20")
-        maximum_questions = min(max_clarification_questions, len(agents))
-        minimum_calls = 3 * len(agents) + maximum_questions + 2
-        call_budget = max_model_calls if max_model_calls is not None else minimum_calls * 3
+        minimum_calls = cycle_cost(len(agents), max_clarification_questions)
+        call_budget = (
+            max_model_calls if max_model_calls is not None
+            else default_call_budget(len(agents), max_clarification_questions)
+        )
         if call_budget < minimum_calls:
             raise ValueError(
                 f"max_model_calls must be at least {minimum_calls} for this chaired workflow"
@@ -218,6 +227,25 @@ class SidechainOrchestrator:
 
     def wait_until_active(self, timeout: float | None = None) -> bool:
         return self._active_ready.wait(timeout)
+
+    def snapshot(self) -> dict[str, object]:
+        """What a live observer may read while a session runs.
+
+        Everything here is already published to the room or the audit log, so an
+        interface can show spend and progress without reaching into internals.
+        """
+        with self._condition:
+            return {
+                "active": self._active,
+                "accepting_input": self._accepting_input,
+                "revision": self._revision,
+                "max_revisions": self.max_revisions,
+                "model_calls": self._model_calls,
+                "max_model_calls": self.max_model_calls,
+                "cycle_cost": self.cycle_cost,
+                "usage": dict(self._usage),
+                "abstentions": dict(self._abstentions),
+            }
 
     def _append_locked(
         self,

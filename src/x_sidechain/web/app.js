@@ -170,7 +170,11 @@ function createCorrectionEvent(message) {
 sidebarToggle.addEventListener("click", () => setSidebar(!shell.classList.contains("sidebar-collapsed")));
 document.querySelectorAll("[data-view-target]").forEach((button) => button.addEventListener("click", () => selectView(button.dataset.viewTarget)));
 document.querySelectorAll("[data-settings-target]").forEach((button) => button.addEventListener("click", () => selectSettings(button.dataset.settingsTarget)));
-document.querySelectorAll("[data-open-agent], .agent-chip[data-agent]").forEach((button) => button.addEventListener("click", () => openAgent(button.dataset.openAgent || button.dataset.agent)));
+// Delegated, because the live layer replaces the roster with the real agents.
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-open-agent], .agent-chip[data-agent]");
+  if (button) openAgent(button.dataset.openAgent || button.dataset.agent);
+});
 document.querySelector("#closeDrawer").addEventListener("click", closeAgent);
 scrim.addEventListener("click", closeAgent);
 
@@ -179,6 +183,7 @@ document.querySelectorAll("[data-language]").forEach((button) => button.addEvent
 
 document.querySelector("#composer").addEventListener("submit", (event) => {
   event.preventDefault();
+  if (window.__xscLive) return;
   const message = promptInput.value.trim();
   if (!message || held) {
     if (held) showToast(t("held"));
@@ -201,6 +206,7 @@ document.querySelector("#holdButton").addEventListener("click", (event) => {
 });
 
 document.querySelector("#finishButton").addEventListener("click", () => {
+  if (window.__xscLive) return;
   setPhase(7);
   document.querySelector("#runState").textContent = currentLanguage === "ar" ? "اكتملت" : "Complete";
   document.querySelector("#runState").previousElementSibling?.classList.remove("live-dot");

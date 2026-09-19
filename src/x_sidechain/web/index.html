@@ -48,7 +48,7 @@
             <svg><use href="#i-sessions"/></svg><span data-i18n="nav.sessions">Sessions</span><span class="nav-count">27</span>
           </button>
           <button class="nav-item" type="button" data-view-target="agents" data-tooltip="Agents">
-            <svg><use href="#i-agents"/></svg><span data-i18n="nav.agents">Agents</span><span class="nav-count">6</span>
+            <svg><use href="#i-agents"/></svg><span data-i18n="nav.agents">Agents</span><span class="nav-count" id="agentCount">6</span>
           </button>
           <button class="nav-item" type="button" data-view-target="workspaces" data-tooltip="Workspaces">
             <svg><use href="#i-workspace"/></svg><span data-i18n="nav.workspaces">Workspaces</span>
@@ -100,7 +100,7 @@
               </div>
             </div>
 
-            <div class="agent-strip" aria-label="Agents in this session">
+            <div class="agent-strip" id="agentStrip" aria-label="Agents in this session">
               <button class="agent-chip chair" type="button" data-agent="validator">
                 <span class="avatar">VA</span><span><strong>validator</strong><small>Chair · Claude Sonnet</small></span><span class="online-dot"></span>
               </button>
@@ -167,13 +167,13 @@
               <aside class="session-panel" aria-label="Session summary">
                 <div class="panel-heading"><strong data-i18n="room.session">Session</strong><span class="tag green">Bounded</span></div>
                 <dl class="metrics">
-                  <div><dt>Quorum</dt><dd>4 of 5</dd></div>
-                  <div><dt>Model calls</dt><dd>18 / 54</dd></div>
-                  <div><dt>Tokens</dt><dd>42.8k</dd></div>
-                  <div><dt>Deadline</dt><dd>42 min</dd></div>
-                  <div><dt>Restarts</dt><dd>1 available</dd></div>
+                  <div><dt>Quorum</dt><dd id="spendQuorum">4 of 5</dd></div>
+                  <div><dt>Model calls</dt><dd id="spendCalls">18 / 54</dd></div>
+                  <div><dt>Tokens</dt><dd id="spendTokens">42.8k</dd></div>
+                  <div><dt>Deadline</dt><dd id="spendDeadline">42 min</dd></div>
+                  <div><dt>Restarts</dt><dd id="spendRevisions">1 available</dd></div>
                 </dl>
-                <div class="budget-bar"><span></span></div>
+                <div class="budget-bar"><span id="budgetBar"></span></div>
                 <div class="guard-list">
                   <div><svg><use href="#i-lock"/></svg><span>Provider errors contained</span></div>
                   <div><svg><use href="#i-lock"/></svg><span>Private workspaces isolated</span></div>
@@ -296,5 +296,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="app.js" defer></script>
+    <script src="live.js" type="module"></script>
   </body>
 </html>

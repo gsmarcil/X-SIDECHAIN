@@ -291,6 +291,7 @@ input::placeholder, textarea::placeholder { color: #60748e; }
 .room-grid { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 12px; }
 .conversation-column { min-width: 0; }
 .event-list { display: grid; gap: 9px; }
+.empty-room { margin: 0; padding: 56px 24px; text-align: center; color: var(--muted); font-size: 14px; }
 .event-card { width: 100%; display: block; padding: 12px 14px; color: var(--text); background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); text-align: start; }
 button.event-card { cursor: pointer; }
 button.event-card:hover { border-color: #3a5d86; background: #111d2c; }
