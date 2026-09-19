@@ -1,0 +1,72 @@
+.TH X-SIDECHAIN 1 "2026-09-19" "x-sidechain 0.5.0" "User Commands"
+.SH NAME
+x\-sidechain \- provider\-agnostic, evidence\-first multi\-agent deliberation
+.SH SYNOPSIS
+.B x\-sidechain
+.I COMMAND
+.RI [ OPTIONS ]
+.SH DESCRIPTION
+.B x\-sidechain
+runs a chaired deliberation between agents hosted by different providers.
+Each agent works in a private workspace, publishes a bounded public brief,
+answers the chair's clarifications, and reviews the chair's draft. Every
+public event is written to a hash\-chained audit log.
+.PP
+A session is bounded before it starts: one full cycle costs at most
+3N + min(Q, N) + 2 model calls, for N agents and Q clarification questions.
+.SH COMMANDS
+.TP
+.B run \-\-config \fIFILE.json\fR \-\-prompt \fITEXT\fR
+Run every configured agent on a task and print the final result.
+Add
+.B \-\-interactive
+to send a correction to the room while the agents work.
+.TP
+.B ui " [" \-\-config \fIFILE.json\fR "] [" \-\-port \fIPORT\fR "] [" \-\-no\-browser ]
+Serve the local interface on the loopback address and open it. Without
+.BR \-\-config ,
+the file named under
+.B FILES
+is used when it exists.
+.TP
+.B validate\-config \-\-config \fIFILE.json\fR
+Check a configuration without making any provider call.
+.TP
+.B providers \-\-config \fIFILE.json\fR
+List the configured providers.
+.TP
+.B auth login \fIPROVIDER\fR \-\-config \fIFILE.json\fR
+Authenticate a provider through its own official flow.
+.TP
+.B auth status \fIPROVIDER\fR \-\-config \fIFILE.json\fR
+Report whether a provider is authenticated.
+.TP
+.B verify \fIAUDIT.jsonl\fR
+Verify that an audit log's hash chain is intact.
+.SH FILES
+.TP
+.I ~/.config/x\-sidechain/config.json
+Configuration loaded by
+.B ui
+when no
+.B \-\-config
+is given. Honours
+.BR XDG_CONFIG_HOME .
+.TP
+.I ~/.local/share/x\-sidechain/sessions/
+Audit logs and private agent workspaces, created owner\-only.
+.SH SECURITY
+The interface binds the loopback address only, requires a one\-off token, and
+refuses a request whose Host or Origin is not its own address. A provider
+secret's value never reaches the interface: it is told the variable's name and
+whether it is set. Provider error text is scrubbed of credentials before it is
+stored.
+.SH EXIT STATUS
+.TP
+.B 0
+The command completed.
+.TP
+.B 1
+The command failed; the reason is printed to standard error.
+.SH SEE ALSO
+Project documentation: \fIhttps://github.com/gsmarcil/X\-SIDECHAIN\fR

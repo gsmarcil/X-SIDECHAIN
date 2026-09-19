@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import select
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from x_sidechain import __version__
 from x_sidechain.audit import AuditLog
 from x_sidechain.auth import codex_account_login, codex_account_status, oauth_device_login
 from x_sidechain.config import RunConfig, load_config
@@ -17,10 +19,31 @@ from x_sidechain.providers import create_provider
 from x_sidechain.ui import serve_ui
 
 
+def ui_config_path() -> Path:
+    """Where a desktop launch looks for its configuration.
+
+    A launcher passes no arguments, so the interface needs somewhere to look.
+    Running agents from the command line stays explicit: only `ui` uses this.
+    """
+    base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return base / "x-sidechain" / "config.json"
+
+
+def default_ui_config() -> Path | None:
+    path = ui_config_path()
+    return path if path.is_file() else None
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="x-sidechain",
         description="Provider-agnostic, evidence-first multi-agent deliberation engine",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"x-sidechain {__version__}",
+        help="print the version and exit",
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
@@ -63,7 +86,10 @@ def _parser() -> argparse.ArgumentParser:
     ui.add_argument(
         "--config",
         metavar="FILE.json",
-        help="load providers and agents so sessions can be started from the interface",
+        help=(
+            "load providers and agents so sessions can be started from the interface; "
+            f"defaults to {ui_config_path()} when that file exists"
+        ),
     )
     ui.add_argument(
         "--no-browser",
@@ -158,7 +184,8 @@ def main() -> int:
     args = _parser().parse_args()
     if args.command == "ui":
         try:
-            ui_config = load_config(args.config) if args.config else None
+            chosen_config = Path(args.config) if args.config else default_ui_config()
+            ui_config = load_config(chosen_config) if chosen_config else None
             serve_ui(port=args.port, open_browser=not args.no_browser, config=ui_config)
             return 0
         except (OSError, ValueError) as exc:

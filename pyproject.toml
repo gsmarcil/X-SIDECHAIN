@@ -1,26 +1,40 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "x-sidechain"
-version = "0.5.0"
+dynamic = ["version"]
 description = "Evidence-first multi-provider AI deliberation for Linux"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "gsmarcil" }]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["multi-agent", "deliberation", "llm", "audit", "linux"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
+  "Intended Audience :: Developers",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+
+[project.urls]
+Homepage = "https://github.com/gsmarcil/X-SIDECHAIN"
+Source = "https://github.com/gsmarcil/X-SIDECHAIN"
+Issues = "https://github.com/gsmarcil/X-SIDECHAIN/issues"
 
 [project.scripts]
 x-sidechain = "x_sidechain.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "x_sidechain.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-x_sidechain = ["web/*.html", "web/*.css", "web/*.js"]
+x_sidechain = ["web/*.html", "web/*.css", "web/*.js", "web/*.png"]

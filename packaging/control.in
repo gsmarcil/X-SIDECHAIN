@@ -1,0 +1,21 @@
+Package: x-sidechain
+Version: @VERSION@
+Section: devel
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.11)
+Installed-Size: @INSTALLED_SIZE@
+Maintainer: gsmarcil <marcil.rachid@gmail.com>
+Homepage: https://github.com/gsmarcil/X-SIDECHAIN
+Description: evidence-first multi-agent deliberation for Linux
+ X-SIDECHAIN runs a chaired deliberation between AI agents hosted by
+ different providers. Each agent works in a private workspace, publishes a
+ bounded public brief, answers the chair's clarifications, and reviews the
+ chair's draft.
+ .
+ Every session is bounded before it starts and every public event is written
+ to a hash-chained audit log that can be verified afterwards. A local
+ interface, served on the loopback address behind a one-off token, shows the
+ deliberation as it happens.
+ .
+ The package needs no libraries beyond the Python standard library.
