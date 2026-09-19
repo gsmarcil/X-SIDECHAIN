@@ -113,7 +113,7 @@
               <button class="agent-chip" type="button" data-agent="local-reviewer">
                 <span class="avatar">LR</span><span><strong>local-reviewer</strong><small>Local · Qwen</small></span><span class="online-dot local"></span>
               </button>
-              <button class="add-agent" type="button" id="addAgentInline"><svg><use href="#i-plus"/></svg><span data-i18n="action.agent">Agent</span></button>
+              <button class="add-agent" type="button" id="addAgentInline"><svg><use href="#i-agents"/></svg><span data-i18n="action.team">Choose team</span></button>
             </div>
 
             <div class="phase-card">
@@ -291,6 +291,22 @@
         <label>Model identifier<input name="model" placeholder="Passed to the provider unchanged"></label>
         <label>Role<textarea name="role" rows="3" placeholder="What should this agent contribute?"></textarea></label>
         <div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button primary" value="default">Add agent</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="sessionSetupDialog">
+      <form class="dialog-card" id="sessionSetupForm">
+        <div class="dialog-heading">
+          <div><span class="eyebrow" data-i18n="team.eyebrow">Next session</span><h2 data-i18n="team.title">Choose the team</h2></div>
+          <button class="icon-button" type="button" id="closeSessionSetup" aria-label="Close team selection"><svg><use href="#i-close"/></svg></button>
+        </div>
+        <p class="dialog-copy" data-i18n="team.help">Select at least two agents and choose one participating agent as chair.</p>
+        <div class="team-options" id="sessionAgentOptions"></div>
+        <p class="form-error" id="teamSetupError" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="button secondary" type="button" id="cancelSessionSetup" data-i18n="team.cancel">Cancel</button>
+          <button class="button primary" type="submit" data-i18n="team.confirm">Use this team</button>
+        </div>
       </form>
     </dialog>
 

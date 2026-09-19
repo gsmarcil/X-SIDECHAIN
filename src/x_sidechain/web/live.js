@@ -40,6 +40,14 @@ const el = {
   strip: document.querySelector("#agentStrip"),
   title: document.querySelector("#topTitle"),
   finish: document.querySelector("#finishButton"),
+  chooseTeam: document.querySelector("#addAgentInline"),
+  newSession: document.querySelector("#newSession"),
+  setupDialog: document.querySelector("#sessionSetupDialog"),
+  setupForm: document.querySelector("#sessionSetupForm"),
+  setupOptions: document.querySelector("#sessionAgentOptions"),
+  setupError: document.querySelector("#teamSetupError"),
+  setupClose: document.querySelector("#closeSessionSetup"),
+  setupCancel: document.querySelector("#cancelSessionSetup"),
   phases: [...document.querySelectorAll("#phaseTrack li")]
 };
 
@@ -49,6 +57,10 @@ function toast(message) {
   node.textContent = message;
   node.classList.add("show");
   setTimeout(() => node.classList.remove("show"), 3200);
+}
+
+function translated(key, fallback) {
+  return window.xscTranslate?.(key) || fallback;
 }
 
 function setPhase(phase) {
@@ -113,20 +125,25 @@ function appendEvent(event) {
 /* A session that is running takes corrections; otherwise the composer starts
    the next one. The page is the same either way. */
 let running = false;
+let liveConfig = null;
+let selectedAgents = new Set();
+let chairId = "";
 
 function setRunning(value, label) {
   running = value;
   if (el.runState) el.runState.textContent = label;
   if (el.finish) el.finish.disabled = !value;
+  if (el.chooseTeam) el.chooseTeam.disabled = value;
 }
 
 function renderRoster(config) {
   if (!el.strip) return;
   const addButton = el.strip.querySelector(".add-agent");
   el.strip.querySelectorAll(".agent-chip").forEach((chip) => chip.remove());
-  const chips = config.agents.map((agent) => {
+  const chosen = config.agents.filter((agent) => selectedAgents.has(agent.id));
+  const chips = chosen.map((agent) => {
     const chip = document.createElement("button");
-    chip.className = agent.chair ? "agent-chip chair" : "agent-chip";
+    chip.className = agent.id === chairId ? "agent-chip chair" : "agent-chip";
     chip.type = "button";
     chip.dataset.agent = agent.id;
 
@@ -139,7 +156,7 @@ function renderRoster(config) {
     name.textContent = agent.id;
     const detail = document.createElement("small");
     /* The role is what the agent was hired for; the model is what answers. */
-    detail.textContent = `${agent.chair ? "Chair" : agent.role || "Agent"} \u00b7 ${agent.model}`;
+    detail.textContent = `${agent.id === chairId ? "Chair" : agent.role || "Agent"} \u00b7 ${agent.model}`;
     label.append(name, detail);
 
     const dot = document.createElement("span");
@@ -152,7 +169,84 @@ function renderRoster(config) {
   });
   el.strip.prepend(...chips);
   if (addButton) el.strip.append(addButton);
-  setText("#agentCount", String(config.agents.length));
+  setText("#agentCount", String(chosen.length));
+  setText("#spendQuorum", `${chosen.length} agents`);
+}
+
+function initializeTeam(config) {
+  liveConfig = config;
+  if (!selectedAgents.size) {
+    config.agents.forEach((agent) => selectedAgents.add(agent.id));
+  }
+  if (!chairId || !selectedAgents.has(chairId)) {
+    chairId = config.chair || config.agents.find((agent) => agent.chair)?.id || config.agents[0]?.id || "";
+  }
+  renderRoster(config);
+}
+
+function renderTeamOptions() {
+  if (!liveConfig || !el.setupOptions) return;
+  el.setupOptions.replaceChildren();
+  liveConfig.agents.forEach((agent) => {
+    const row = document.createElement("div");
+    row.className = "team-option";
+
+    const enabled = document.createElement("input");
+    enabled.type = "checkbox";
+    enabled.className = "team-enabled";
+    enabled.value = agent.id;
+    enabled.checked = selectedAgents.has(agent.id);
+    enabled.setAttribute("aria-label", `${translated("action.team", "Choose team")}: ${agent.id}`);
+
+    const avatar = document.createElement("span");
+    avatar.className = "avatar";
+    avatar.textContent = agent.id.slice(0, 2).toUpperCase();
+
+    const copy = document.createElement("span");
+    copy.className = "team-option-copy";
+    const name = document.createElement("strong");
+    name.textContent = agent.id;
+    const detail = document.createElement("small");
+    detail.textContent = `${agent.role || "Agent"} \u00b7 ${agent.provider} / ${agent.model}`;
+    copy.append(name, detail);
+
+    const chair = document.createElement("label");
+    chair.className = "chair-choice";
+    const chairRadio = document.createElement("input");
+    chairRadio.type = "radio";
+    chairRadio.name = "session-chair";
+    chairRadio.value = agent.id;
+    chairRadio.checked = agent.id === chairId;
+    chairRadio.disabled = !enabled.checked;
+    const chairText = document.createElement("span");
+    chairText.textContent = translated("team.chair", "Chair");
+    chair.append(chairRadio, chairText);
+
+    enabled.addEventListener("change", () => {
+      chairRadio.disabled = !enabled.checked;
+      if (!enabled.checked && chairRadio.checked) {
+        const replacement = el.setupOptions.querySelector(".team-enabled:checked")
+          ?.closest(".team-option")?.querySelector('input[name="session-chair"]');
+        if (replacement) replacement.checked = true;
+      }
+    });
+    row.append(enabled, avatar, copy, chair);
+    el.setupOptions.append(row);
+  });
+}
+
+function openTeamDialog() {
+  if (!liveConfig || !el.setupDialog) return;
+  if (running) {
+    toast("The team is locked while a session is running.");
+    return;
+  }
+  if (el.setupError) {
+    el.setupError.textContent = "";
+    el.setupError.hidden = true;
+  }
+  renderTeamOptions();
+  el.setupDialog.showModal();
 }
 
 function setText(selector, value) {
@@ -179,6 +273,11 @@ function applySpend(spend) {
 
 function takeOver(state) {
   window.__xscLive = true;
+  if (Array.isArray(state.agents) && state.agents.length) {
+    selectedAgents = new Set(state.agents);
+    chairId = state.chair || chairId;
+    if (liveConfig) renderRoster(liveConfig);
+  }
   if (el.title && state.task) el.title.textContent = state.task;
   el.events.replaceChildren();
   state.events.forEach(appendEvent);
@@ -215,11 +314,52 @@ function idle(config) {
 
 async function begin(task) {
   emptyRoom("Opening the session…");
-  await api.post("/api/run", { task });
+  await api.post("/api/run", { task, agents: [...selectedAgents], chair: chairId });
   setRunning(true, "Running");
   if (el.title) el.title.textContent = task;
   listen();
 }
+
+if (el.chooseTeam) {
+  el.chooseTeam.addEventListener("click", (event) => {
+    if (!liveConfig) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openTeamDialog();
+  }, true);
+}
+
+if (el.setupForm) {
+  el.setupForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const agents = [...el.setupOptions.querySelectorAll(".team-enabled:checked")]
+      .map((input) => input.value);
+    const chair = el.setupOptions.querySelector('input[name="session-chair"]:checked:not(:disabled)')?.value || "";
+    if (agents.length < 2) {
+      if (el.setupError) {
+        el.setupError.textContent = "Choose at least two agents.";
+        el.setupError.hidden = false;
+      }
+      return;
+    }
+    if (!chair || !agents.includes(chair)) {
+      if (el.setupError) {
+        el.setupError.textContent = "Choose a chair from the enabled agents.";
+        el.setupError.hidden = false;
+      }
+      return;
+    }
+    selectedAgents = new Set(agents);
+    chairId = chair;
+    renderRoster(liveConfig);
+    el.setupDialog.close();
+    toast(`${agents.length} agents selected; ${chair} is the chair.`);
+  });
+}
+
+[el.setupClose, el.setupCancel].forEach((button) => {
+  button?.addEventListener("click", () => el.setupDialog?.close());
+});
 
 function listen() {
   const source = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
@@ -286,13 +426,23 @@ if (el.finish) {
 
 async function start() {
   if (!token) {
-    /* Served without a token in the address: the page stays a prototype. */
+    /* A hosted visual preview has no local token. Build the team picker from
+       its sample roster while leaving the simulated room behavior intact. */
+    const agents = [...document.querySelectorAll("#agentStrip .agent-chip")].map((chip) => ({
+      id: chip.dataset.agent,
+      provider: "preview",
+      model: chip.querySelector("small")?.textContent || "Preview model",
+      role: chip.classList.contains("chair") ? "Chair" : "Agent",
+      chair: chip.classList.contains("chair")
+    }));
+    if (agents.length) {
+      initializeTeam({ agents, providers: [], chair: agents.find((agent) => agent.chair)?.id || agents[0].id });
+    }
     return;
   }
   const config = await api.get("/api/config");
   if (!config.live) return;
-  renderRoster(config);
-  setText("#spendQuorum", `${config.agents.length} agents`);
+  initializeTeam(config);
   const deadline = config.limits.session_deadline_seconds;
   setText("#spendDeadline", deadline ? `${Math.round(deadline / 60)} min` : "none");
   const state = await api.get("/api/state");
