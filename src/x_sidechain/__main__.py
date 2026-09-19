@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from x_sidechain.audit import AuditLog
-from x_sidechain.auth import oauth_device_login
+from x_sidechain.auth import codex_account_login, codex_account_status, oauth_device_login
 from x_sidechain.config import RunConfig, load_config
 from x_sidechain.models import DiscussionEvent, DiscussionResult
 from x_sidechain.orchestrator import AgentRuntime, SidechainOrchestrator
@@ -43,9 +43,17 @@ def _parser() -> argparse.ArgumentParser:
 
     auth = subcommands.add_parser("auth", help="provider account authentication")
     auth_subcommands = auth.add_subparsers(dest="auth_command", required=True)
-    login = auth_subcommands.add_parser("login", help="run an official OAuth Device Flow")
+    login = auth_subcommands.add_parser("login", help="authenticate on the provider's official flow")
     login.add_argument("provider")
     login.add_argument("--config", required=True, metavar="FILE.json")
+    login.add_argument(
+        "--device-auth",
+        action="store_true",
+        help="use Codex device authentication instead of the local-browser callback",
+    )
+    status = auth_subcommands.add_parser("status", help="show provider authentication status")
+    status.add_argument("provider")
+    status.add_argument("--config", required=True, metavar="FILE.json")
 
     verify = subcommands.add_parser("verify", help="verify a tamper-evident audit log")
     verify.add_argument("audit_log", metavar="AUDIT.jsonl")
@@ -172,13 +180,38 @@ def main() -> int:
             return 0
         if args.command == "providers":
             for provider in config.providers.values():
-                print(f"{provider.id}\t{provider.protocol}\t{provider.auth.type}\t{provider.base_url}")
+                endpoint = provider.base_url or "managed by Codex CLI"
+                print(f"{provider.id}\t{provider.protocol}\t{provider.auth.type}\t{endpoint}")
             return 0
         if args.command == "auth" and args.auth_command == "login":
             if args.provider not in config.providers:
                 raise ValueError(f"unknown provider: {args.provider}")
-            print(oauth_device_login(config.providers[args.provider]))
+            provider = config.providers[args.provider]
+            if provider.auth.type == "chatgpt_account":
+                print(codex_account_login(device_auth=args.device_auth))
+            elif provider.auth.type == "oauth_device":
+                if args.device_auth:
+                    raise ValueError("--device-auth is only used by ChatGPT account login")
+                print(oauth_device_login(provider))
+            else:
+                raise ValueError(f"provider {provider.id} does not support account login")
             return 0
+        if args.command == "auth" and args.auth_command == "status":
+            if args.provider not in config.providers:
+                raise ValueError(f"unknown provider: {args.provider}")
+            provider = config.providers[args.provider]
+            if provider.auth.type != "chatgpt_account":
+                print(f"{provider.id}: authentication mode is {provider.auth.type}")
+                return 0
+            status = codex_account_status()
+            if not status.available:
+                print(f"{provider.id}: Codex CLI not installed")
+                return 1
+            if status.authenticated:
+                print(f"{provider.id}: signed in with ChatGPT")
+                return 0
+            print(f"{provider.id}: not signed in with ChatGPT")
+            return 1
         if args.command == "run":
             orchestrator = SidechainOrchestrator(
                 agents=_runtimes(config),

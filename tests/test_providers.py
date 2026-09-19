@@ -1,8 +1,11 @@
+import subprocess
 import unittest
+from unittest.mock import patch
 
-from x_sidechain.auth import AuthMaterial
+from x_sidechain.auth import AuthMaterial, CodexAccountStatus
 from x_sidechain.config import AuthConfig, ProviderConfig
 from x_sidechain.providers.anthropic import AnthropicProvider
+from x_sidechain.providers.codex_cli import CodexCLIProvider
 from x_sidechain.providers.openai_compatible import OpenAICompatibleProvider
 
 
@@ -85,7 +88,72 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(captured["headers"]["anthropic-version"], "2023-06-01")
         self.assertEqual(captured["headers"]["x-api-key"], "secret")
 
+    def test_codex_cli_disables_execution_tools_and_reads_only_final_answer(self) -> None:
+        config = ProviderConfig(
+            id="chatgpt",
+            protocol="codex_cli",
+            base_url="",
+            auth=AuthConfig(type="chatgpt_account"),
+        )
+        captured = {}
+
+        def run(argv, **kwargs):
+            captured.update(argv=argv, kwargs=kwargs)
+            output = argv[argv.index("--output-last-message") + 1]
+            with open(output, "w", encoding="utf-8") as handle:
+                handle.write("account answer\n")
+            return subprocess.CompletedProcess(argv, 0)
+
+        with (
+            patch("x_sidechain.providers.codex_cli.shutil.which", return_value="/usr/bin/codex"),
+            patch("x_sidechain.providers.codex_cli.subprocess.run", side_effect=run),
+        ):
+            provider = CodexCLIProvider(
+                config,
+                "gpt-test",
+                status_checker=lambda: CodexAccountStatus(True, True, "chatgpt"),
+            )
+            reply = provider.generate("system rule", "user task")
+
+        self.assertEqual(reply.text, "account answer")
+        self.assertIn("--ephemeral", captured["argv"])
+        self.assertIn("--ignore-user-config", captured["argv"])
+        self.assertIn("--ignore-rules", captured["argv"])
+        self.assertIn("features.shell_tool=false", captured["argv"])
+        self.assertIn("features.web_search=false", captured["argv"])
+        self.assertIn("features.multi_agent=false", captured["argv"])
+        self.assertEqual(captured["kwargs"]["stdout"], subprocess.DEVNULL)
+        sent = captured["kwargs"]["input"].decode("utf-8")
+        self.assertIn("system rule", sent)
+        self.assertIn("user task", sent)
+
+    def test_codex_cli_error_detail_is_private_and_scrubbed(self) -> None:
+        config = ProviderConfig(
+            id="chatgpt",
+            protocol="codex_cli",
+            base_url="",
+            auth=AuthConfig(type="chatgpt_account"),
+        )
+
+        def run(argv, **kwargs):
+            kwargs["stderr"].write(b"Bearer sk-secret-secret-secret provider detail")
+            return subprocess.CompletedProcess(argv, 1)
+
+        with (
+            patch("x_sidechain.providers.codex_cli.shutil.which", return_value="/usr/bin/codex"),
+            patch("x_sidechain.providers.codex_cli.subprocess.run", side_effect=run),
+        ):
+            provider = CodexCLIProvider(
+                config,
+                "gpt-test",
+                status_checker=lambda: CodexAccountStatus(True, True, "chatgpt"),
+            )
+            with self.assertRaisesRegex(RuntimeError, "provider command failed") as caught:
+                provider.generate("system", "prompt")
+        self.assertNotIn("sk-secret", str(caught.exception))
+        self.assertNotIn("sk-secret", caught.exception.detail)
+        self.assertIn("[REDACTED]", caught.exception.detail)
+
 
 if __name__ == "__main__":
     unittest.main()
-

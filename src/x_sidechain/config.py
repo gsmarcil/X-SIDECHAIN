@@ -11,8 +11,8 @@ from x_sidechain.models import AgentSpec, cycle_cost
 from x_sidechain.workspace import validate_agent_id
 
 
-SUPPORTED_PROTOCOLS = {"responses", "chat_completions", "anthropic_messages"}
-SUPPORTED_AUTH = {"none", "api_key", "oauth_device"}
+SUPPORTED_PROTOCOLS = {"responses", "chat_completions", "anthropic_messages", "codex_cli"}
+SUPPORTED_AUTH = {"none", "api_key", "oauth_device", "chatgpt_account"}
 
 
 @dataclass(frozen=True)
@@ -187,15 +187,34 @@ def load_config(path: str | Path) -> RunConfig:
         allow_insecure = item.get("allow_insecure_http", False)
         if not isinstance(allow_insecure, bool):
             raise ValueError(f"{context}.allow_insecure_http must be a boolean")
-        providers[provider_id] = ProviderConfig(
-            id=provider_id,
-            protocol=protocol,
-            base_url=_validate_url(
+        auth = _auth_config(item.get("auth", {"type": "none"}), context, allow_insecure)
+        if protocol == "codex_cli":
+            if "base_url" in item:
+                raise ValueError(f"{context}.base_url is not used by codex_cli; remove it")
+            if headers:
+                raise ValueError(f"{context}.headers are not used by codex_cli")
+            if allow_insecure:
+                raise ValueError(f"{context}.allow_insecure_http is not used by codex_cli")
+            if auth.type != "chatgpt_account":
+                raise ValueError(
+                    f"{context}.auth.type must be chatgpt_account when protocol is codex_cli"
+                )
+            base_url = ""
+        else:
+            if auth.type == "chatgpt_account":
+                raise ValueError(
+                    f"{context}.auth.type chatgpt_account is only valid with codex_cli"
+                )
+            base_url = _validate_url(
                 _required_string(item, "base_url", context),
                 f"{context}.base_url",
                 allow_insecure,
-            ),
-            auth=_auth_config(item.get("auth", {"type": "none"}), context, allow_insecure),
+            )
+        providers[provider_id] = ProviderConfig(
+            id=provider_id,
+            protocol=protocol,
+            base_url=base_url,
+            auth=auth,
             headers=dict(headers),
             max_output_tokens=max_tokens,
             allow_insecure_http=allow_insecure,

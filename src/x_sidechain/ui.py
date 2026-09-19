@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from x_sidechain.auth import codex_account_status
 from x_sidechain.config import RunConfig
 from x_sidechain.models import DiscussionEvent, cycle_cost, default_call_budget
 from x_sidechain.orchestrator import AgentRuntime, SidechainOrchestrator
@@ -121,7 +122,7 @@ class SessionManager:
         providers = []
         for provider in self.config.providers.values():
             env = provider.auth.env or provider.auth.token_env
-            providers.append({
+            described = {
                 "id": provider.id,
                 "protocol": provider.protocol,
                 "base_url": provider.base_url,
@@ -130,7 +131,13 @@ class SessionManager:
                 "env_present": bool(env and os.environ.get(env, "").strip()),
                 "allow_insecure_http": provider.allow_insecure_http,
                 "max_output_tokens": provider.max_output_tokens,
-            })
+            }
+            if provider.auth.type == "chatgpt_account":
+                status = codex_account_status()
+                described["account_available"] = status.available
+                described["account_authenticated"] = status.authenticated
+                described["account_method"] = status.method
+            providers.append(described)
         agents = [
             {"id": a.id, "provider": a.provider, "model": a.model, "role": a.role,
              "chair": a.id == self.config.chair}

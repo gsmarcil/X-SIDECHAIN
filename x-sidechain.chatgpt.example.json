@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "providers": {
+    "openai-chatgpt": {
+      "protocol": "codex_cli",
+      "auth": {"type": "chatgpt_account"}
+    }
+  },
+  "agents": [
+    {
+      "id": "explorer",
+      "provider": "openai-chatgpt",
+      "model": "gpt-6-astra",
+      "role": "Develop candidate solutions and identify the evidence each one needs."
+    },
+    {
+      "id": "validator",
+      "provider": "openai-chatgpt",
+      "model": "gpt-6-astra",
+      "role": "Challenge assumptions, find decisive counterexamples, and chair the joint result."
+    }
+  ],
+  "chair": "validator",
+  "max_clarification_questions": 2,
+  "max_model_calls": 30,
+  "request_timeout_seconds": 600,
+  "min_agent_quorum": 2,
+  "max_revisions": 6,
+  "session_deadline_seconds": 3600,
+  "max_public_brief_chars": 1200
+}

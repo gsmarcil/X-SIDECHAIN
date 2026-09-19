@@ -15,6 +15,7 @@ At least two agents are required.
 | `responses` | `base_url/responses` | Responses-compatible APIs |
 | `chat_completions` | `base_url/chat/completions` | Chat-compatible and local servers |
 | `anthropic_messages` | `base_url/messages` | Anthropic Messages-compatible APIs |
+| `codex_cli` | Managed by the official Codex CLI | ChatGPT account access for OpenAI models |
 
 ## Example provider
 
@@ -39,6 +40,23 @@ unless it points at a loopback address; `allow_insecure_http: true` is the expli
 opt-out for a remote cleartext endpoint. For official OAuth Device
 Flow, provide `device_authorization_url`, `token_url`, `client_id`, and optional
 `scopes`, then run `x-sidechain auth login PROVIDER_ID --config x-sidechain.json`.
+
+For a ChatGPT account, do not set `base_url`, headers, or an API-key environment
+variable:
+
+```json
+{
+  "protocol": "codex_cli",
+  "auth": {"type": "chatgpt_account"}
+}
+```
+
+Run `x-sidechain auth login PROVIDER_ID --config x-sidechain.json` once. The
+official Codex CLI owns the browser callback, token storage, and refresh. Add
+`--device-auth` only when the machine cannot complete the local-browser flow.
+The model identifier is still passed through unchanged. Codex CLI currently does
+not expose provider token counts through this adapter, so session usage totals omit
+those calls while the model-call budget remains enforced.
 
 ## Team and chair
 
