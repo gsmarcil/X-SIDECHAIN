@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from x_sidechain.auth import codex_account_status
+from x_sidechain.auth import CodexAccountStatusCache
 from x_sidechain.config import RunConfig
 from x_sidechain.models import DiscussionEvent, cycle_cost, default_call_budget
 from x_sidechain.orchestrator import AgentRuntime, SidechainOrchestrator
@@ -56,6 +56,8 @@ class LiveSession:
     progress: str = ""
     error: str = ""
     result: str = ""
+    audit_path: str = ""
+    workspace_root: str = ""
     # The last event of a finished run, kept so a viewer who arrives afterwards
     # is told the run is over instead of waiting on a stream that never speaks.
     terminal: tuple[str, dict[str, Any]] | None = None
@@ -96,6 +98,8 @@ class LiveSession:
             "progress": self.progress,
             "error": self.error,
             "result": self.result,
+            "audit_path": self.audit_path,
+            "workspace_root": self.workspace_root,
             "agents": [runtime.spec.id for runtime in runtimes],
             "chair": getattr(self.orchestrator, "chair_id", ""),
             "events": list(self.events),
@@ -106,8 +110,14 @@ class LiveSession:
 class SessionManager:
     """Owns at most one run at a time, as the orchestrator itself does."""
 
-    def __init__(self, config: RunConfig | None) -> None:
+    def __init__(
+        self,
+        config: RunConfig | None,
+        *,
+        codex_status_cache: CodexAccountStatusCache | None = None,
+    ) -> None:
         self.config = config
+        self._codex_status_cache = codex_status_cache or CodexAccountStatusCache()
         self._current: LiveSession | None = None
         self._lock = threading.Lock()
 
@@ -133,10 +143,11 @@ class SessionManager:
                 "max_output_tokens": provider.max_output_tokens,
             }
             if provider.auth.type == "chatgpt_account":
-                status = codex_account_status()
+                status = self._codex_status_cache.get()
                 described["account_available"] = status.available
                 described["account_authenticated"] = status.authenticated
                 described["account_method"] = status.method
+                described["account_checking"] = status.checking
             providers.append(described)
         agents = [
             {"id": a.id, "provider": a.provider, "model": a.model, "role": a.role,
@@ -232,6 +243,8 @@ class SessionManager:
                 result = session.orchestrator.run(task)
                 session.session_id = result.session_id
                 session.result = result.synthesis.text
+                session.audit_path = result.audit_path
+                session.workspace_root = result.workspace_root
                 session.status = "completed"
                 session.phase = 7
                 session.finish("done", {

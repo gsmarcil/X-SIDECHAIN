@@ -1,3 +1,4 @@
+import os
 import subprocess
 import unittest
 from unittest.mock import patch
@@ -104,7 +105,13 @@ class ProviderTests(unittest.TestCase):
                 handle.write("account answer\n")
             return subprocess.CompletedProcess(argv, 0)
 
+        sentinels = {
+            "OPENAI_API_KEY": "sk-sentinel-openai-key",
+            "XAI_API_KEY": "xai-sentinel-key",
+            "ANTHROPIC_API_KEY": "sk-ant-sentinel",
+        }
         with (
+            patch.dict(os.environ, sentinels, clear=False),
             patch("x_sidechain.providers.codex_cli.shutil.which", return_value="/usr/bin/codex"),
             patch("x_sidechain.providers.codex_cli.subprocess.run", side_effect=run),
         ):
@@ -123,6 +130,10 @@ class ProviderTests(unittest.TestCase):
         self.assertIn("features.web_search=false", captured["argv"])
         self.assertIn("features.multi_agent=false", captured["argv"])
         self.assertEqual(captured["kwargs"]["stdout"], subprocess.DEVNULL)
+        child_env = captured["kwargs"]["env"]
+        for name in sentinels:
+            self.assertNotIn(name, child_env)
+        self.assertEqual(child_env.get("PATH"), os.environ.get("PATH"))
         sent = captured["kwargs"]["input"].decode("utf-8")
         self.assertIn("system rule", sent)
         self.assertIn("user task", sent)

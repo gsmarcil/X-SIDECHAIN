@@ -1,10 +1,14 @@
 import os
 import subprocess
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
 from x_sidechain.auth import (
     AuthMaterial,
+    CodexAccountStatus,
+    CodexAccountStatusCache,
     codex_account_login,
     codex_account_status,
     oauth_device_login,
@@ -99,7 +103,11 @@ class AuthTests(unittest.TestCase):
             text=True,
             check=False,
             timeout=10,
+            env=unittest.mock.ANY,
         )
+        child_env = run.call_args.kwargs["env"]
+        self.assertNotIn("OPENAI_API_KEY", child_env)
+        self.assertNotIn("ANTHROPIC_API_KEY", child_env)
 
     def test_codex_api_key_login_is_not_misreported_as_account_login(self) -> None:
         with (
@@ -127,7 +135,49 @@ class AuthTests(unittest.TestCase):
         ):
             message = codex_account_login(device_auth=True)
         self.assertIn("ChatGPT", message)
-        run.assert_called_once_with(["/usr/bin/codex", "login", "--device-auth"], check=False)
+        run.assert_called_once_with(
+            ["/usr/bin/codex", "login", "--device-auth"],
+            check=False,
+            env=unittest.mock.ANY,
+        )
+
+    def test_codex_status_cache_refreshes_once_without_blocking_callers(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        calls = 0
+
+        def slow_status() -> CodexAccountStatus:
+            nonlocal calls
+            calls += 1
+            started.set()
+            release.wait(timeout=2)
+            return CodexAccountStatus(True, True, "chatgpt")
+
+        cache = CodexAccountStatusCache(
+            checker=slow_status,
+            availability_checker=lambda: True,
+            ttl_seconds=30,
+        )
+        before = time.monotonic()
+        first = cache.get()
+        second = cache.get()
+        elapsed = time.monotonic() - before
+
+        self.assertTrue(started.wait(timeout=1))
+        self.assertLess(elapsed, 0.2)
+        self.assertTrue(first.checking)
+        self.assertTrue(second.checking)
+        self.assertEqual(calls, 1)
+
+        release.set()
+        deadline = time.monotonic() + 1
+        status = cache.get()
+        while status.checking and time.monotonic() < deadline:
+            time.sleep(0.01)
+            status = cache.get()
+        self.assertTrue(status.authenticated)
+        self.assertFalse(status.checking)
+        self.assertEqual(calls, 1)
 
 
 if __name__ == "__main__":

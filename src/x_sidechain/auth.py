@@ -4,13 +4,14 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
-from dataclasses import dataclass
-from typing import Any, Protocol
+from dataclasses import dataclass, replace
+from typing import Any, Callable, Mapping, Protocol
 
 from x_sidechain.config import AuthConfig, ProviderConfig
 
@@ -76,6 +77,34 @@ class CodexAccountStatus:
     available: bool
     authenticated: bool
     method: str | None = None
+    checking: bool = False
+
+
+# The Codex process must be able to find its executable, account store, locale,
+# certificates, and desktop login helper. Provider credentials and arbitrary
+# application variables are deliberately absent. Keep this an allowlist: a
+# denylist will inevitably miss the next provider's key name.
+_CODEX_ENV_ALLOWLIST = frozenset({
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "COLORTERM",
+    "LANG", "TMPDIR", "TMP", "TEMP", "CODEX_HOME",
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE", "DBUS_SESSION_BUS_ADDRESS",
+    "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "BROWSER",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+    "WSL_DISTRO_NAME", "WSL_INTEROP",
+})
+
+
+def codex_subprocess_env(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Return the explicit, credential-free environment used by Codex children."""
+    source = os.environ if source is None else source
+    return {
+        name: value
+        for name, value in source.items()
+        if name in _CODEX_ENV_ALLOWLIST or name.startswith("LC_")
+    }
 
 
 def codex_account_status(timeout: int = 10) -> CodexAccountStatus:
@@ -90,6 +119,7 @@ def codex_account_status(timeout: int = 10) -> CodexAccountStatus:
             text=True,
             check=False,
             timeout=timeout,
+            env=codex_subprocess_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return CodexAccountStatus(True, False)
@@ -112,7 +142,7 @@ def codex_account_login(device_auth: bool = False) -> str:
     if device_auth:
         argv.append("--device-auth")
     try:
-        result = subprocess.run(argv, check=False)
+        result = subprocess.run(argv, check=False, env=codex_subprocess_env())
     except OSError as exc:
         raise RuntimeError("could not start Codex account authentication") from exc
     if result.returncode != 0:
@@ -123,6 +153,66 @@ def codex_account_login(device_auth: bool = False) -> str:
             raise RuntimeError("Codex is using an API key, not a ChatGPT account")
         raise RuntimeError("Codex did not report an active ChatGPT account session")
     return "ChatGPT account authentication completed through Codex CLI"
+
+
+class CodexAccountStatusCache:
+    """Small stale-while-refresh cache for the UI's Codex account indicator.
+
+    The CLI can take up to ten seconds to answer. UI request threads therefore
+    never execute it directly: the first request starts one background refresh,
+    and concurrent requests receive a truthful ``checking`` state.
+    """
+
+    def __init__(
+        self,
+        *,
+        checker: Callable[[], CodexAccountStatus] = codex_account_status,
+        availability_checker: Callable[[], bool] | None = None,
+        ttl_seconds: float = 30.0,
+    ) -> None:
+        self._checker = checker
+        self._availability_checker = availability_checker or (
+            lambda: shutil.which("codex") is not None
+        )
+        self._ttl_seconds = ttl_seconds
+        self._status: CodexAccountStatus | None = None
+        self._checked_at = 0.0
+        self._refreshing = False
+        self._lock = threading.Lock()
+
+    def get(self) -> CodexAccountStatus:
+        now = time.monotonic()
+        with self._lock:
+            fresh = self._status is not None and now - self._checked_at < self._ttl_seconds
+            if fresh:
+                return self._status
+
+            if not self._availability_checker():
+                self._status = CodexAccountStatus(False, False)
+                self._checked_at = now
+                return self._status
+
+            if not self._refreshing:
+                self._refreshing = True
+                threading.Thread(
+                    target=self._refresh,
+                    name="xsidechain-codex-status",
+                    daemon=True,
+                ).start()
+
+            if self._status is None:
+                return CodexAccountStatus(True, False, checking=True)
+            return replace(self._status, checking=True)
+
+    def _refresh(self) -> None:
+        try:
+            status = self._checker()
+        except Exception:  # noqa: BLE001 - status reporting must not break the UI
+            status = CodexAccountStatus(True, False, "unknown")
+        with self._lock:
+            self._status = replace(status, checking=False)
+            self._checked_at = time.monotonic()
+            self._refreshing = False
 
 
 def resolve_auth(provider: ProviderConfig, token_store: TokenStore | None = None) -> AuthMaterial:
