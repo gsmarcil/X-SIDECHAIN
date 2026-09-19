@@ -31,6 +31,9 @@ workflow, authentication, and provider contracts are stable.
   so a long session still ends with a result.
 - Responses-compatible, Chat Completions-compatible, and Anthropic
   Messages-compatible endpoints.
+- ChatGPT account access through the official Codex CLI. X-SIDECHAIN invokes
+  Codex ephemerally with execution and retrieval tools disabled, and never reads
+  its credential file.
 - API keys, trusted local no-auth endpoints, and official OAuth Device Flow where a
   provider exposes it.
 
@@ -97,7 +100,23 @@ the interface is told a variable's name and whether it is set, nothing more.
 
 ## Authentication
 
-`api_key` reads a secret from the configured environment variable. `none` is for
+For OpenAI, a ChatGPT account can be the primary path instead of entering an API
+key. Install the official [Codex CLI](https://learn.chatgpt.com/docs/auth), copy
+the account-based example, then authenticate once:
+
+```bash
+cp x-sidechain.chatgpt.example.json x-sidechain.json
+x-sidechain auth login openai-chatgpt --config x-sidechain.json
+x-sidechain auth status openai-chatgpt --config x-sidechain.json
+```
+
+The normal login opens OpenAI's browser flow. On a headless device, add
+`--device-auth`. Codex owns, stores, and refreshes the account credential;
+X-SIDECHAIN asks `codex login status` for a yes/no state and never reads
+`~/.codex/auth.json`.
+
+This account route is deliberately separate from the OpenAI Platform API.
+`api_key` still reads a secret from the configured environment variable. `none` is for
 trusted local endpoints. `oauth_device` is available only when a provider publishes
 an official OAuth Device Flow:
 
@@ -106,8 +125,8 @@ x-sidechain auth login PROVIDER_ID --config x-sidechain.json
 ```
 
 Email, MFA, consent, and account challenges remain on the provider's official page.
-X-SIDECHAIN never scrapes login pages or reads email. OAuth tokens are stored through
-Linux Secret Service using `secret-tool`.
+X-SIDECHAIN never scrapes login pages or reads email. OAuth tokens for generic
+providers are stored through Linux Secret Service using `secret-tool`.
 
 ## Development and audit verification
 

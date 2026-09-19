@@ -182,6 +182,58 @@ function initializeTeam(config) {
     chairId = config.chair || config.agents.find((agent) => agent.chair)?.id || config.agents[0]?.id || "";
   }
   renderRoster(config);
+  renderProviderSettings(config);
+}
+
+function renderProviderSettings(config) {
+  const list = document.querySelector("#providerSettingsList");
+  if (!list || !Array.isArray(config.providers)) return;
+  list.replaceChildren();
+  config.providers.forEach((provider) => {
+    const row = document.createElement("article");
+    row.className = "setting-group provider-row";
+    const identity = document.createElement("div");
+    const badge = document.createElement("span");
+    badge.className = "provider-badge";
+    badge.textContent = provider.id.slice(0, 1).toUpperCase();
+    const copy = document.createElement("div");
+    const name = document.createElement("h3");
+    name.textContent = provider.id;
+    const detail = document.createElement("p");
+    detail.textContent = provider.auth === "chatgpt_account"
+      ? `ChatGPT account · ${provider.protocol}`
+      : `${provider.auth} · ${provider.protocol}`;
+    copy.append(name, detail);
+    identity.append(badge, copy);
+
+    const state = document.createElement("span");
+    const local = provider.base_url?.startsWith("http://127.0.0.1") ||
+      provider.base_url?.startsWith("http://localhost");
+    const accountReady = provider.auth === "chatgpt_account" && provider.account_authenticated;
+    const envReady = provider.auth === "api_key" && provider.env_present;
+    const ready = accountReady || envReady || provider.auth === "none";
+    state.className = ready ? "tag green" : "tag warning";
+    state.textContent = local ? "Local" : ready ? "Connected" :
+      provider.account_available === false ? "Codex missing" : "Sign in required";
+
+    const action = document.createElement("button");
+    action.className = "button secondary";
+    action.type = "button";
+    if (provider.auth === "chatgpt_account") {
+      const command = `x-sidechain auth login ${provider.id} --config YOUR_CONFIG.json`;
+      action.textContent = accountReady ? "Account connected" : "Copy login command";
+      action.disabled = accountReady;
+      action.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(command); } catch { /* clipboard may be denied */ }
+        toast(command);
+      });
+    } else {
+      action.textContent = "Configured in file";
+      action.disabled = true;
+    }
+    row.append(identity, state, action);
+    list.append(row);
+  });
 }
 
 function renderTeamOptions() {

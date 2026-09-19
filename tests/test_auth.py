@@ -1,8 +1,15 @@
 import os
+import subprocess
 import unittest
 from unittest.mock import patch
 
-from x_sidechain.auth import AuthMaterial, oauth_device_login, resolve_auth
+from x_sidechain.auth import (
+    AuthMaterial,
+    codex_account_login,
+    codex_account_status,
+    oauth_device_login,
+    resolve_auth,
+)
 from x_sidechain.config import AuthConfig, ProviderConfig
 
 
@@ -73,6 +80,54 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(store.value, "access-token")
         self.assertIn("completed", message)
         self.assertEqual(post.call_count, 3)
+
+    def test_codex_status_accepts_only_chatgpt_account_login(self) -> None:
+        with (
+            patch("x_sidechain.auth.shutil.which", return_value="/usr/bin/codex"),
+            patch(
+                "x_sidechain.auth.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", "Logged in using ChatGPT"),
+            ) as run,
+        ):
+            status = codex_account_status()
+        self.assertTrue(status.available)
+        self.assertTrue(status.authenticated)
+        self.assertEqual(status.method, "chatgpt")
+        run.assert_called_once_with(
+            ["/usr/bin/codex", "login", "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+
+    def test_codex_api_key_login_is_not_misreported_as_account_login(self) -> None:
+        with (
+            patch("x_sidechain.auth.shutil.which", return_value="/usr/bin/codex"),
+            patch(
+                "x_sidechain.auth.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", "Logged in using an API key"),
+            ),
+        ):
+            status = codex_account_status()
+        self.assertFalse(status.authenticated)
+        self.assertEqual(status.method, "api_key")
+
+    def test_codex_login_delegates_device_auth_to_official_cli(self) -> None:
+        with (
+            patch("x_sidechain.auth.shutil.which", return_value="/usr/bin/codex"),
+            patch(
+                "x_sidechain.auth.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0),
+            ) as run,
+            patch(
+                "x_sidechain.auth.codex_account_status",
+                return_value=type("Status", (), {"authenticated": True})(),
+            ),
+        ):
+            message = codex_account_login(device_auth=True)
+        self.assertIn("ChatGPT", message)
+        run.assert_called_once_with(["/usr/bin/codex", "login", "--device-auth"], check=False)
 
 
 if __name__ == "__main__":

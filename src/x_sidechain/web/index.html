@@ -239,9 +239,11 @@
                 </section>
                 <section class="settings-section" data-settings="models">
                   <div class="section-heading"><h2>Models & providers</h2><p>Connections, authentication, local runtimes, and budgets.</p></div>
-                  <article class="setting-group provider-row"><div><span class="provider-badge">O</span><div><h3>OpenAI</h3><p>API key · Responses protocol</p></div></div><span class="tag green">Connected</span><button class="button secondary">Manage</button></article>
-                  <article class="setting-group provider-row"><div><span class="provider-badge">A</span><div><h3>Anthropic</h3><p>Official device authorization</p></div></div><span class="tag green">Connected</span><button class="button secondary">Manage</button></article>
-                  <article class="setting-group provider-row"><div><span class="provider-badge">L</span><div><h3>Local runtime</h3><p>Ollama · http://127.0.0.1:11434</p></div></div><span class="tag green">Local</span><button class="button secondary">Detect models</button></article>
+                  <div id="providerSettingsList">
+                    <article class="setting-group provider-row"><div><span class="provider-badge">O</span><div><h3>OpenAI</h3><p>ChatGPT account or API key</p></div></div><span class="tag neutral">Preview</span><button class="button secondary" type="button">Manage</button></article>
+                    <article class="setting-group provider-row"><div><span class="provider-badge">A</span><div><h3>Anthropic</h3><p>Official provider authentication</p></div></div><span class="tag neutral">Preview</span><button class="button secondary" type="button">Manage</button></article>
+                    <article class="setting-group provider-row"><div><span class="provider-badge">L</span><div><h3>Local runtime</h3><p>Ollama · loopback endpoint</p></div></div><span class="tag green">Local</span><button class="button secondary" type="button">Detect models</button></article>
+                  </div>
                   <article class="setting-group locked-row"><svg><use href="#i-lock"/></svg><div><h3>Provider errors are always contained</h3><p>Raw cross-provider error text cannot be enabled here or in configuration.</p></div></article>
                 </section>
                 <section class="settings-section" data-settings="deliberation">

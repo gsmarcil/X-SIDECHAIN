@@ -71,9 +71,67 @@ class AuthMaterial:
         return result
 
 
+@dataclass(frozen=True)
+class CodexAccountStatus:
+    available: bool
+    authenticated: bool
+    method: str | None = None
+
+
+def codex_account_status(timeout: int = 10) -> CodexAccountStatus:
+    """Ask Codex about its own credential state without reading its auth files."""
+    command = shutil.which("codex")
+    if command is None:
+        return CodexAccountStatus(False, False)
+    try:
+        result = subprocess.run(
+            [command, "login", "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return CodexAccountStatus(True, False)
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    if result.returncode != 0:
+        return CodexAccountStatus(True, False)
+    if "using chatgpt" in output:
+        return CodexAccountStatus(True, True, "chatgpt")
+    if "using an api key" in output:
+        return CodexAccountStatus(True, False, "api_key")
+    return CodexAccountStatus(True, False, "unknown")
+
+
+def codex_account_login(device_auth: bool = False) -> str:
+    """Delegate account authentication to the official Codex CLI."""
+    command = shutil.which("codex")
+    if command is None:
+        raise RuntimeError("Codex CLI is not installed or is not on PATH")
+    argv = [command, "login"]
+    if device_auth:
+        argv.append("--device-auth")
+    try:
+        result = subprocess.run(argv, check=False)
+    except OSError as exc:
+        raise RuntimeError("could not start Codex account authentication") from exc
+    if result.returncode != 0:
+        raise RuntimeError("Codex account authentication did not complete")
+    status = codex_account_status()
+    if not status.authenticated:
+        if status.method == "api_key":
+            raise RuntimeError("Codex is using an API key, not a ChatGPT account")
+        raise RuntimeError("Codex did not report an active ChatGPT account session")
+    return "ChatGPT account authentication completed through Codex CLI"
+
+
 def resolve_auth(provider: ProviderConfig, token_store: TokenStore | None = None) -> AuthMaterial:
     auth = provider.auth
     if auth.type == "none":
+        return AuthMaterial(None, None)
+    if auth.type == "chatgpt_account":
+        # Codex owns and refreshes this credential. It must never become an HTTP
+        # header or pass through X-SIDECHAIN's process memory.
         return AuthMaterial(None, None)
     if auth.type == "api_key":
         value = os.getenv(str(auth.env), "").strip()
@@ -163,4 +221,3 @@ def oauth_device_login(
             continue
         raise RuntimeError(f"account authentication failed: {error or status}")
     raise RuntimeError("account authentication expired before approval")
-

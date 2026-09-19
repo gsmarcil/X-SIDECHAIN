@@ -38,6 +38,42 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.agents[2].model, "model-c")
         self.assertEqual(config.providers["custom"].protocol, "chat_completions")
 
+    def test_codex_cli_uses_chatgpt_account_without_a_base_url(self) -> None:
+        raw = valid_config()
+        raw["providers"]["custom"] = {
+            "protocol": "codex_cli",
+            "auth": {"type": "chatgpt_account"},
+        }
+        config = self._load(raw)
+        provider = config.providers["custom"]
+        self.assertEqual(provider.protocol, "codex_cli")
+        self.assertEqual(provider.auth.type, "chatgpt_account")
+        self.assertEqual(provider.base_url, "")
+
+    def test_codex_cli_rejects_http_and_key_configuration(self) -> None:
+        raw = valid_config()
+        raw["providers"]["custom"] = {
+            "protocol": "codex_cli",
+            "base_url": "https://api.openai.com/v1",
+            "auth": {"type": "chatgpt_account"},
+        }
+        with self.assertRaisesRegex(ValueError, "base_url is not used"):
+            self._load(raw)
+
+        raw = valid_config()
+        raw["providers"]["custom"] = {
+            "protocol": "codex_cli",
+            "auth": {"type": "api_key", "env": "OPENAI_API_KEY"},
+        }
+        with self.assertRaisesRegex(ValueError, "must be chatgpt_account"):
+            self._load(raw)
+
+    def test_chatgpt_account_cannot_be_sent_to_an_http_endpoint(self) -> None:
+        raw = valid_config()
+        raw["providers"]["custom"]["auth"] = {"type": "chatgpt_account"}
+        with self.assertRaisesRegex(ValueError, "only valid with codex_cli"):
+            self._load(raw)
+
     def test_unknown_provider_is_rejected(self) -> None:
         raw = valid_config()
         raw["agents"][0]["provider"] = "missing"

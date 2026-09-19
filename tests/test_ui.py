@@ -166,6 +166,25 @@ class ConfigReportTests(unittest.TestCase):
         self.assertTrue(provider["env_present"])
         self.assertNotIn("sk-not-for-the-page", json.dumps(described))
 
+    def test_chatgpt_account_status_reaches_the_interface_without_credentials(self) -> None:
+        raw = {**self.RAW}
+        raw["providers"] = {
+            "p": {"protocol": "codex_cli", "auth": {"type": "chatgpt_account"}}
+        }
+        status = type(
+            "Status",
+            (),
+            {"available": True, "authenticated": True, "method": "chatgpt"},
+        )()
+        with unittest.mock.patch("x_sidechain.ui.codex_account_status", return_value=status):
+            provider = self._describe(raw)["providers"][0]
+        self.assertTrue(provider["account_available"])
+        self.assertTrue(provider["account_authenticated"])
+        self.assertEqual(provider["account_method"], "chatgpt")
+        self.assertNotIn("access_token", provider)
+        self.assertNotIn("refresh_token", provider)
+        self.assertNotIn("credential", provider)
+
 
 class SessionSelectionTests(unittest.TestCase):
     class _Provider:
