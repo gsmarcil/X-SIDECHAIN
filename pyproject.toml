@@ -21,3 +21,6 @@ x-sidechain = "x_sidechain.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+x_sidechain = ["web/*.html", "web/*.css", "web/*.js"]

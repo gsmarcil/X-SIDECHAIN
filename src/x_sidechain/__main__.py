@@ -14,6 +14,7 @@ from x_sidechain.config import RunConfig, load_config
 from x_sidechain.models import DiscussionEvent, DiscussionResult
 from x_sidechain.orchestrator import AgentRuntime, SidechainOrchestrator
 from x_sidechain.providers import create_provider
+from x_sidechain.ui import serve_ui
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -48,6 +49,14 @@ def _parser() -> argparse.ArgumentParser:
 
     verify = subcommands.add_parser("verify", help="verify a tamper-evident audit log")
     verify.add_argument("audit_log", metavar="AUDIT.jsonl")
+
+    ui = subcommands.add_parser("ui", help="run the local HTML interface prototype")
+    ui.add_argument("--port", type=int, default=8765)
+    ui.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="serve the UI without opening the default browser",
+    )
     return parser
 
 
@@ -134,6 +143,13 @@ def _interactive_run(orchestrator: SidechainOrchestrator, task: str) -> Discussi
 
 def main() -> int:
     args = _parser().parse_args()
+    if args.command == "ui":
+        try:
+            serve_ui(port=args.port, open_browser=not args.no_browser)
+            return 0
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {exc}")
+            return 2
     if args.command == "verify":
         valid, message = AuditLog.verify(args.audit_log)
         print(("PASS" if valid else "FAIL") + f": {message}")
