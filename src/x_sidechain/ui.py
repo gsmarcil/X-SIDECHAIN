@@ -86,6 +86,7 @@ class LiveSession:
         self.publish(kind, payload)
 
     def state(self) -> dict[str, Any]:
+        runtimes = getattr(self.orchestrator, "agents", ())
         return {
             "session_id": self.session_id,
             "task": self.task,
@@ -94,6 +95,8 @@ class LiveSession:
             "progress": self.progress,
             "error": self.error,
             "result": self.result,
+            "agents": [runtime.spec.id for runtime in runtimes],
+            "chair": getattr(self.orchestrator, "chair_id", ""),
             "events": list(self.events),
             "spend": self.orchestrator.snapshot(),
         }
@@ -165,7 +168,12 @@ class SessionManager:
             if self._current is not None and self._current.status in {"starting", "running"}:
                 raise ValueError("a session is already running")
 
-            chosen = [a for a in self.config.agents if a.id in set(agent_ids)] if agent_ids else list(self.config.agents)
+            configured_ids = {a.id for a in self.config.agents}
+            requested_ids = set(agent_ids)
+            unknown_ids = requested_ids - configured_ids
+            if unknown_ids:
+                raise ValueError(f"unknown agent id: {sorted(unknown_ids)[0]}")
+            chosen = [a for a in self.config.agents if a.id in requested_ids] if agent_ids else list(self.config.agents)
             if len(chosen) < 2:
                 raise ValueError("select at least two agents")
             chair_id = chair or self.config.chair
@@ -357,10 +365,18 @@ class LocalUIRequestHandler(SimpleHTTPRequestHandler):
                 task = str(body.get("task", "")).strip()
                 if not task:
                     raise ValueError("a task is required")
+                raw_agents = body.get("agents", [])
+                if not isinstance(raw_agents, list) or not all(
+                    isinstance(agent_id, str) for agent_id in raw_agents
+                ):
+                    raise ValueError("agents must be an array of agent ids")
+                raw_chair = body.get("chair", "")
+                if not isinstance(raw_chair, str):
+                    raise ValueError("chair must be an agent id")
                 session = self.manager.start(
                     task,
-                    [str(a) for a in body.get("agents", [])],
-                    str(body.get("chair", "")),
+                    [agent_id.strip() for agent_id in raw_agents],
+                    raw_chair.strip(),
                 )
                 self._json(202, {"status": session.status, "task": session.task})
             elif path == "/api/steer":

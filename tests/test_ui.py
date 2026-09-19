@@ -3,6 +3,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock
 import urllib.error
@@ -11,6 +12,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from x_sidechain.config import load_config
+from x_sidechain.models import ModelReply
 from x_sidechain.ui import LiveSession, SessionManager, build_ui_server, phase_of
 
 WEB = files("x_sidechain") / "web"
@@ -107,6 +109,25 @@ class APIGuardTests(ServedUITestCase):
         with urlopen(_request(f"{self.base}/api/state", token=self.token), timeout=2) as response:
             self.assertEqual(json.loads(response.read())["status"], "idle")
 
+    def test_run_forwards_the_selected_agents_and_chair(self) -> None:
+        session = unittest.mock.Mock(status="starting", task="prove it")
+        with unittest.mock.patch.object(self.server.ui_manager, "start", return_value=session) as start:
+            with urlopen(_request(
+                f"{self.base}/api/run", token=self.token, method="POST",
+                body={"task": "prove it", "agents": ["one", "three"], "chair": "three"},
+            ), timeout=2) as response:
+                self.assertEqual(response.status, 202)
+        start.assert_called_once_with("prove it", ["one", "three"], "three")
+
+    def test_run_rejects_a_non_array_agent_selection(self) -> None:
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urlopen(_request(
+                f"{self.base}/api/run", token=self.token, method="POST",
+                body={"task": "prove it", "agents": "one", "chair": "one"},
+            ), timeout=2)
+        self.assertEqual(caught.exception.code, 409)
+        self.assertIn("array", json.loads(caught.exception.read())["error"])
+
 
 class ConfigReportTests(unittest.TestCase):
     RAW = {
@@ -144,6 +165,65 @@ class ConfigReportTests(unittest.TestCase):
         self.assertEqual(provider["env"], "P_KEY")
         self.assertTrue(provider["env_present"])
         self.assertNotIn("sk-not-for-the-page", json.dumps(described))
+
+
+class SessionSelectionTests(unittest.TestCase):
+    class _Provider:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.calls = []
+
+        def generate(self, system: str, prompt: str) -> ModelReply:
+            self.calls.append(prompt)
+            if prompt.startswith("PRIVATE WORKSPACE ANALYSIS"):
+                text = f"private analysis from {self.name}"
+            elif prompt.startswith("Create the public brief"):
+                text = f"CLAIM: public summary from {self.name}"
+            elif "Return JSON only:" in prompt:
+                text = '{"questions": []}'
+            elif prompt.startswith("CHAIR DRAFT"):
+                text = f"chair draft from {self.name}"
+            elif prompt.startswith("REVIEW THE CHAIR DRAFT"):
+                text = "VERDICT: APPROVE\nERROR: NONE\nCORRECTION: NONE\nEVIDENCE: test"
+            elif prompt.startswith("FINAL RESULT"):
+                text = f"final result from {self.name}"
+            else:
+                raise AssertionError(f"unexpected prompt: {prompt[:80]}")
+            return ModelReply(self.name, self.name, text)
+
+    def test_only_the_selected_agents_run_and_the_selected_chair_decides(self) -> None:
+        raw = {
+            "version": 1,
+            "providers": {
+                name: {"protocol": "chat_completions", "base_url": "https://models.example/v1"}
+                for name in ("p1", "p2", "p3")
+            },
+            "agents": [
+                {"id": "one", "provider": "p1", "model": "m1", "role": "one"},
+                {"id": "two", "provider": "p2", "model": "m2", "role": "two"},
+                {"id": "three", "provider": "p3", "model": "m3", "role": "three"},
+            ],
+            "chair": "two",
+        }
+        providers = {name: self._Provider(name) for name in raw["providers"]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            manager = SessionManager(load_config(path))
+            with unittest.mock.patch(
+                "x_sidechain.ui.create_provider",
+                side_effect=lambda config, model, timeout: providers[config.id],
+            ):
+                session = manager.start("compare", ["one", "three"], "three")
+                deadline = time.monotonic() + 3
+                while session.status in {"starting", "running"} and time.monotonic() < deadline:
+                    time.sleep(0.01)
+
+        self.assertEqual(session.status, "completed")
+        self.assertEqual(session.state()["agents"], ["one", "three"])
+        self.assertEqual(session.state()["chair"], "three")
+        self.assertEqual(session.result, "final result from p3")
+        self.assertEqual(providers["p2"].calls, [])
 
 
 class FinishedSessionTests(ServedUITestCase):

@@ -434,6 +434,30 @@ dialog::backdrop { background: rgb(0 0 0 / 60%); backdrop-filter: blur(3px); }
 .dialog-heading, .dialog-actions { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .dialog-heading h2 { margin: 3px 0 0; }
 .dialog-actions { justify-content: flex-end; margin-top: 5px; }
+.dialog-copy { margin: -2px 0 2px; color: var(--muted); }
+.team-options { display: grid; gap: 8px; max-height: min(52vh, 470px); overflow: auto; padding: 2px; }
+.team-option {
+  display: grid;
+  grid-template-columns: auto 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 62px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: #101a28;
+}
+.team-option:has(.team-enabled:checked) { border-color: #35628f; background: #112238; }
+.team-option input { min-height: auto; accent-color: var(--blue); }
+.team-option-copy { min-width: 0; }
+.team-option-copy strong, .team-option-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-option-copy small { margin-top: 3px; color: var(--muted); }
+.chair-choice { display: inline-flex; align-items: center; gap: 6px; color: #9eb0c7; font-size: 12px; }
+.chair-choice:has(input:checked) { color: #8fbcff; font-weight: 700; }
+.chair-choice input:disabled + span { opacity: .45; }
+.form-error { margin: 0; padding: 9px 10px; border: 1px solid #8f3235; border-radius: 8px; color: #ffb1ae; background: #32161b; }
+.agent-chip.not-selected { opacity: .55; border-style: dashed; }
+.add-agent:disabled { opacity: .5; cursor: not-allowed; }
 
 .toast { position: fixed; inset-inline-end: 20px; bottom: 20px; min-width: 240px; padding: 11px 14px; border: 1px solid #23775a; border-radius: 9px; color: #dff9ef; background: #0d3126; box-shadow: var(--shadow); opacity: 0; transform: translateY(12px); pointer-events: none; transition: 160ms; z-index: 120; }
 .toast.show { opacity: 1; transform: translateY(0); }
