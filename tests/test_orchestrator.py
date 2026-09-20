@@ -10,7 +10,7 @@ from pathlib import Path
 from x_sidechain.audit import AuditLog
 from x_sidechain.http import ProviderHTTPError
 from x_sidechain.models import AgentSpec, ModelReply
-from x_sidechain.orchestrator import AgentRuntime, SidechainOrchestrator
+from x_sidechain.orchestrator import AgentRuntime, DeadlineReached, SidechainOrchestrator
 
 
 class ScriptedProvider:
@@ -480,6 +480,47 @@ class OrchestratorTests(unittest.TestCase):
 
             # The running cycle still finishes, so the session yields a result.
             self.assertEqual(result.events[-1].kind, "chair.final")
+
+    def test_a_cycle_does_not_restart_after_the_deadline_passes(self) -> None:
+        # The correction is accepted while there is still time; the deadline then
+        # passes while the superseded cycle unwinds. The restart is the moment
+        # the wall-clock budget has to be re-checked.
+        release = threading.Event()
+        reached = threading.Event()
+
+        class BlockingProvider(ScriptedProvider):
+            def generate(self, system: str, prompt: str) -> ModelReply:
+                if prompt.startswith("CHAIR DRAFT"):
+                    reached.set()
+                    release.wait(timeout=5)
+                return super().generate(system, prompt)
+
+        with tempfile.TemporaryDirectory() as directory:
+            orchestrator = SidechainOrchestrator(
+                (runtime("chair", BlockingProvider("chair")), runtime("peer", ScriptedProvider("peer"))),
+                chair_id="chair",
+                max_clarification_questions=0,
+                session_deadline_seconds=3600,
+                audit_directory=Path(directory),
+            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(orchestrator.run, "original task")
+                self.assertTrue(reached.wait(timeout=5))
+                orchestrator.inject_user_message("a correction, while there is still time")
+                orchestrator._deadline = time.monotonic() - 1  # time runs out meanwhile
+                release.set()
+                with self.assertRaisesRegex(DeadlineReached, "deadline passed"):
+                    future.result(timeout=10)
+
+            logs = list(Path(directory).glob("*.jsonl"))
+            self.assertEqual(len(logs), 1)
+            kinds = [
+                json.loads(line)["event"]
+                for line in logs[0].read_text().splitlines()
+                if line.strip()
+            ]
+            self.assertIn("cycle.deadline_refused", kinds)
+            self.assertEqual(kinds[-1], "session.failed")
 
     def test_provider_error_text_never_leaves_the_failing_agent(self) -> None:
         secret = "access_token=TOPSECRET-abc123"

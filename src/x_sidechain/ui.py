@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from x_sidechain.auth import CodexAccountStatusCache
+from x_sidechain import __version__
 from x_sidechain.config import RunConfig
 from x_sidechain.models import DiscussionEvent, cycle_cost, default_call_budget
 from x_sidechain.orchestrator import AgentRuntime, SidechainOrchestrator
@@ -75,6 +76,15 @@ class LiveSession:
             if q in self._subs:
                 self._subs.remove(q)
 
+    def record(self, payload: dict[str, Any]) -> None:
+        """Append a room event under the lock that `state` reads it with.
+
+        The orchestrator writes from its own thread while HTTP threads read, so
+        the two must not meet an event half-appended.
+        """
+        with self._lock:
+            self.events.append(payload)
+
     def publish(self, kind: str, payload: dict[str, Any]) -> None:
         with self._lock:
             subs = list(self._subs)
@@ -90,6 +100,8 @@ class LiveSession:
 
     def state(self) -> dict[str, Any]:
         runtimes = getattr(self.orchestrator, "agents", ())
+        with self._lock:
+            events = list(self.events)
         return {
             "session_id": self.session_id,
             "task": self.task,
@@ -102,7 +114,7 @@ class LiveSession:
             "workspace_root": self.workspace_root,
             "agents": [runtime.spec.id for runtime in runtimes],
             "chair": getattr(self.orchestrator, "chair_id", ""),
-            "events": list(self.events),
+            "events": events,
             "spend": self.orchestrator.snapshot(),
         }
 
@@ -128,7 +140,13 @@ class SessionManager:
     def describe_config(self) -> dict[str, Any]:
         """Config for the interface. Never a secret: env names and presence only."""
         if self.config is None:
-            return {"live": False, "providers": [], "agents": [], "limits": {}}
+            return {
+                "live": False,
+                "version": __version__,
+                "providers": [],
+                "agents": [],
+                "limits": {},
+            }
         providers = []
         for provider in self.config.providers.values():
             env = provider.auth.env or provider.auth.token_env
@@ -164,6 +182,7 @@ class SessionManager:
             budget = default_call_budget(count, questions)
         return {
             "live": True,
+            "version": __version__,
             "providers": providers,
             "agents": agents,
             "chair": self.config.chair,
@@ -214,7 +233,7 @@ class SessionManager:
 
             def on_event(event: DiscussionEvent) -> None:
                 payload = event.public_dict()
-                session.events.append(payload)
+                session.record(payload)
                 session.publish("room", payload)
 
             def on_progress(message: str) -> None:
@@ -255,6 +274,8 @@ class SessionManager:
                     "model_calls": result.model_calls,
                     "usage_totals": result.usage_totals,
                     "abstentions": result.abstentions,
+                    # The final spend, measured the same way as while it ran.
+                    "spend": session.orchestrator.snapshot(),
                 })
             except Exception as exc:  # noqa: BLE001 - reported, never swallowed
                 session.status = "failed"

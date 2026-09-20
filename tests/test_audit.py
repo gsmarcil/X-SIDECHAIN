@@ -83,6 +83,38 @@ class AuditLogTests(unittest.TestCase):
                 AuditLog("session", Path(directory))
 
 
+class CorruptLogTests(unittest.TestCase):
+    """verify exists to answer whether a log holds; it must always answer."""
+
+    def _verdict(self, contents: bytes) -> tuple[bool, str]:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "corrupt.jsonl"
+            path.write_bytes(contents)
+            return AuditLog.verify(path)
+
+    def test_every_shape_of_corruption_returns_a_verdict(self) -> None:
+        for contents in (
+            b'["not", "an", "object"]\n',
+            b'"just a string"\n',
+            b"42\n",
+            b"null\n",
+            b"true\n",
+            b'{"sequence": 0}\n',
+            b"not json at all\n",
+            b"\xff\xfe\x00binary\n",
+            b'{"event_hash": "x", "sequence": 5, "previous_hash": "y"}\n',
+        ):
+            with self.subTest(contents=contents[:24]):
+                ok, message = self._verdict(contents)
+                self.assertFalse(ok)
+                self.assertTrue(message, "a refusal must say why")
+
+    def test_a_missing_file_is_reported_not_raised(self) -> None:
+        ok, message = AuditLog.verify(Path("/nonexistent/audit.jsonl"))
+        self.assertFalse(ok)
+        self.assertIn("invalid audit log", message)
+
+
 if __name__ == "__main__":
     unittest.main()
 

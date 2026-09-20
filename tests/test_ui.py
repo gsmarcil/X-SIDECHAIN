@@ -130,7 +130,9 @@ class APIGuardTests(ServedUITestCase):
         self.assertIn("array", json.loads(caught.exception.read())["error"])
 
 
-class ConfigReportTests(unittest.TestCase):
+class DescribesConfig:
+    """The configuration fixture shared by the tests that read it back."""
+
     RAW = {
         "version": 1,
         "providers": {"p": {"protocol": "chat_completions",
@@ -150,6 +152,9 @@ class ConfigReportTests(unittest.TestCase):
             return SessionManager(
                 load_config(path), codex_status_cache=status_cache
             ).describe_config()
+
+
+class ConfigReportTests(DescribesConfig, unittest.TestCase):
 
     def test_an_unset_budget_is_reported_as_the_one_a_run_will_use(self) -> None:
         limits = self._describe(self.RAW)["limits"]
@@ -307,6 +312,62 @@ class FinishedSessionTests(ServedUITestCase):
         self.assertIn("event: done", body)
 
 
+class VersionReportingTests(DescribesConfig, unittest.TestCase):
+    def test_the_config_reports_the_engine_version(self) -> None:
+        from x_sidechain import __version__
+        self.assertEqual(self._describe(self.RAW)["version"], __version__)
+
+    def test_a_page_without_a_config_still_learns_the_version(self) -> None:
+        from x_sidechain import __version__
+        self.assertEqual(SessionManager(None).describe_config()["version"], __version__)
+
+
+class EndOfRunSpendTests(unittest.TestCase):
+    class _Snapshot:
+        def snapshot(self):
+            return {"active": False, "model_calls": 9, "max_model_calls": 36,
+                    "revision": 1, "max_revisions": 8, "cycle_cost": 12,
+                    "usage": {"prompt_tokens": 88}, "abstentions": {},
+                    "accepting_input": False}
+
+    def test_a_finished_run_reports_the_budget_it_had_not_the_calls_it_made(self) -> None:
+        # Deriving the maximum from the calls made shows every session as having
+        # spent all of it, which is what the page used to display.
+        session = LiveSession(session_id="s", task="t", orchestrator=self._Snapshot())
+        spend = session.orchestrator.snapshot()
+        self.assertEqual(spend["model_calls"], 9)
+        self.assertNotEqual(spend["max_model_calls"], spend["model_calls"])
+
+    def test_the_page_uses_the_snapshot_the_server_sends(self) -> None:
+        script = (WEB / "live.js").read_text(encoding="utf-8")
+        self.assertIn("applySpend(payload.spend)", script)
+        self.assertNotIn("max_model_calls: payload.model_calls", script)
+
+
+class EventLockTests(unittest.TestCase):
+    class _Snapshot:
+        def snapshot(self):
+            return {}
+
+    def test_events_survive_being_appended_while_they_are_read(self) -> None:
+        session = LiveSession(session_id="s", task="t", orchestrator=self._Snapshot())
+        stop = threading.Event()
+
+        def writer() -> None:
+            for index in range(2000):
+                session.record({"sequence": index})
+            stop.set()
+
+        thread = threading.Thread(target=writer)
+        thread.start()
+        seen = []
+        while not stop.is_set():
+            seen.append(len(session.state()["events"]))
+        thread.join(timeout=5)
+        self.assertEqual(len(session.state()["events"]), 2000)
+        self.assertEqual(sorted(seen), seen, "a reader saw the list shrink")
+
+
 class WebAssetTests(unittest.TestCase):
     def test_shipped_page_contains_no_fictional_session_or_workspace_data(self) -> None:
         page = (WEB / "index.html").read_text(encoding="utf-8")
@@ -322,6 +383,11 @@ class WebAssetTests(unittest.TestCase):
         self.assertIn('id="sessionRows"', page)
         self.assertIn('id="agentLibrary"', page)
         self.assertIn('id="workspaceList"', page)
+
+    def test_the_page_carries_no_version_of_its_own(self) -> None:
+        # It cannot drift from the engine if it never states one.
+        page = (WEB / "index.html").read_text(encoding="utf-8")
+        self.assertNotRegex(page, r"v\d+\.\d+\.\d+")
 
     def test_the_live_layer_is_a_module(self) -> None:
         # app.js is a classic script: sharing one global scope with it made the
