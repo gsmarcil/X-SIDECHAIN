@@ -786,6 +786,29 @@ class SidechainOrchestrator:
                             },
                         )
                         remaining = self.max_model_calls - self._model_calls
+                        deadline_passed = (
+                            self._deadline is not None
+                            and time.monotonic() >= self._deadline
+                        )
+                    # A correction is refused once the deadline has passed, but the
+                    # cycle it superseded may run on past it before unwinding to
+                    # here. Starting a fresh cycle now would spend a wall-clock
+                    # budget that is already gone, so the restart is refused for the
+                    # same reason the budget refuses one.
+                    if deadline_passed:
+                        audit.append(
+                            "cycle.deadline_refused",
+                            {
+                                "session_deadline_seconds": self.session_deadline_seconds,
+                                "old_revision": revision,
+                                "new_revision": self._revision,
+                            },
+                        )
+                        raise DeadlineReached(
+                            "the session deadline passed before the corrected cycle could "
+                            "start; raise session_deadline_seconds to keep correcting a "
+                            "session this long"
+                        )
                     if remaining < self.cycle_cost:
                         audit.append(
                             "cycle.restart_refused",

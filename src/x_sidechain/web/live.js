@@ -183,6 +183,8 @@ function initializeTeam(config) {
     chairId = config.chair || config.agents.find((agent) => agent.chair)?.id || config.agents[0]?.id || "";
   }
   renderRoster(config);
+  /* The page ships no version of its own, so it cannot disagree with the engine. */
+  if (config.version) setText(".version", `v${config.version} \u00b7 Linux`);
   renderAgentLibrary(config);
   renderProviderSettings(config);
   renderRuntimeSettings(config);
@@ -582,8 +584,9 @@ function listen() {
     const payload = JSON.parse(message.data);
     setPhase(7);
     setRunning(false, "Completed");
-    applySpend({ model_calls: payload.model_calls, max_model_calls: payload.model_calls,
-                 revision: 0, max_revisions: 0, usage: payload.usage_totals });
+    /* The run's own final snapshot. Deriving the budget from the calls it made
+       would show every finished session as having spent all of it. */
+    applySpend(payload.spend);
     toast(`Session complete — ${payload.model_calls} model calls.`);
     api.get("/api/state").then(renderProcessState).catch(() => {});
     source.close();

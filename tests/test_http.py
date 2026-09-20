@@ -65,7 +65,7 @@ class RetryingTransportTests(unittest.TestCase):
                     attempts.append(1)
                     raise _error
 
-                with unittest.mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                with unittest.mock.patch("x_sidechain.http._urlopen", side_effect=fake_urlopen):
                     with self.assertRaises(ProviderHTTPError) as caught:
                         post_json(
                             "https://example.invalid/v1/chat", {}, {}, 30, sleep=lambda _s: None
@@ -90,7 +90,7 @@ class RetryingTransportTests(unittest.TestCase):
                 return b"secret-body " * 4096
 
         error = HugeError()
-        with unittest.mock.patch("urllib.request.urlopen", side_effect=error):
+        with unittest.mock.patch("x_sidechain.http._urlopen", side_effect=error):
             with self.assertRaises(ProviderHTTPError) as caught:
                 post_json("https://example.invalid/v1/chat", {}, {}, 30, sleep=lambda _s: None)
 
@@ -117,7 +117,7 @@ class RetryingTransportTests(unittest.TestCase):
             def read(self, amt=None):
                 return f"rejected Authorization: Bearer {key}".encode()
 
-        with unittest.mock.patch("urllib.request.urlopen", side_effect=EchoError()):
+        with unittest.mock.patch("x_sidechain.http._urlopen", side_effect=EchoError()):
             with self.assertRaises(ProviderHTTPError) as caught:
                 post_json(
                     "https://example.invalid/v1/chat", headers, {}, 30, sleep=lambda _s: None

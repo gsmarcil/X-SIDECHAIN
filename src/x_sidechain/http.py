@@ -13,13 +13,23 @@ from typing import Any
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 MAX_ERROR_BYTES = 8192
 REDACTED = "[REDACTED]"
-CREDENTIAL_HEADERS = {
-    "api-key",
-    "authorization",
-    "cookie",
-    "proxy-authorization",
-    "x-api-key",
-    "x-goog-api-key",
+# Inverted on purpose. A configuration may name any header as the one carrying
+# its key, so a list of credential names will always miss the next provider's.
+# These are the headers known to carry nothing secret; every other value that
+# goes out is treated as a secret coming back.
+PUBLIC_HEADERS = {
+    "accept",
+    "accept-charset",
+    "accept-encoding",
+    "accept-language",
+    "anthropic-version",
+    "cache-control",
+    "connection",
+    "content-length",
+    "content-type",
+    "host",
+    "openai-beta",
+    "user-agent",
 }
 SECRET_SHAPES = (
     # "Bearer <token>" / "token <token>"
@@ -38,10 +48,10 @@ SECRET_SHAPES = (
 
 
 def _credentials(headers: dict[str, str]) -> list[str]:
-    """The secret parts of outgoing auth headers, longest first."""
+    """The secret parts of the outgoing headers, longest first."""
     found: list[str] = []
     for name, value in headers.items():
-        if name.lower() not in CREDENTIAL_HEADERS or not value:
+        if name.lower() in PUBLIC_HEADERS or not value:
             continue
         found.append(value)
         # "Bearer sk-live-..." also leaks as just the token.
@@ -101,6 +111,30 @@ def _retry_after_seconds(headers: Any, fallback: float) -> float:
         return fallback
 
 
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect.
+
+    urllib follows 301, 302 and 303 by turning the POST into a GET and
+    re-sending the request headers to whatever Location names — including the
+    Authorization header, to a host that may not be the provider at all. A
+    provider that wants to move an endpoint can say so in its configuration;
+    it cannot be allowed to say so mid-call.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        raise urllib.error.HTTPError(
+            req.full_url, code, "redirect refused: credentials are not re-sent", headers, fp
+        )
+
+
+_OPENER = urllib.request.build_opener(_NoRedirects)
+
+
+def _urlopen(request: urllib.request.Request, timeout: int):  # noqa: ANN202
+    """The one place a request leaves this process, so one place refuses redirects."""
+    return _OPENER.open(request, timeout=timeout)
+
+
 def _attempt(url: str, headers: dict[str, str], payload: dict[str, Any], timeout: int) -> str:
     request = urllib.request.Request(
         url,
@@ -109,7 +143,7 @@ def _attempt(url: str, headers: dict[str, str], payload: dict[str, Any], timeout
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _urlopen(request, timeout) as response:
             raw = response.read(MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as exc:
         # Bounded twice: ask for a capped read, then cut what came back. The cap
@@ -118,8 +152,14 @@ def _attempt(url: str, headers: dict[str, str], payload: dict[str, Any], timeout
             exc.read(MAX_ERROR_BYTES)[:MAX_ERROR_BYTES].decode("utf-8", errors="replace"),
             headers,
         )
+        message = (
+            f"provider redirected to another location (HTTP {exc.code}); refused so the "
+            "credential is not re-sent. Point base_url at the new endpoint instead"
+            if 300 <= exc.code < 400
+            else f"provider returned HTTP {exc.code}"
+        )
         raise ProviderHTTPError(
-            f"provider returned HTTP {exc.code}",
+            message,
             status=exc.code,
             retryable=exc.code in RETRYABLE_STATUS,
             detail=body,

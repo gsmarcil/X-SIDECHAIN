@@ -58,6 +58,14 @@ always afford its restart. A refused correction is reported to the user
 and leaves the running cycle free to finish, which is what guarantees that a session
 ends with a result rather than an exhausted budget.
 
+Those bounds are checked again where the restart actually happens. A correction is
+accepted while a cycle is still running, and that cycle may run on for some time
+before it unwinds, so the wall clock and the budget are re-read before a new cycle
+begins: `cycle.deadline_refused` when the session deadline passed in between, and
+`cycle.restart_refused` when the remaining calls no longer cover one full cycle.
+Either ends the session rather than starting a cycle that cannot finish, and the
+reason is in the audit log.
+
 ## Workspace layout
 
 ```text

@@ -110,6 +110,12 @@ class AuditLog:
                     if not line.strip():
                         continue
                     record = json.loads(line)
+                    if not isinstance(record, dict):
+                        # A corrupt log is a verdict, not a crash: the command
+                        # exists to answer whether the chain holds.
+                        return False, f"line {line_number} is not an audit record"
+                    if "event_hash" not in record:
+                        return False, f"no event hash at line {line_number}"
                     actual_hash = record.pop("event_hash")
                     if record.get("sequence") != expected_sequence:
                         return False, f"sequence mismatch at line {line_number}"
@@ -120,8 +126,8 @@ class AuditLog:
                         return False, f"content hash mismatch at line {line_number}"
                     previous = actual_hash
                     expected_sequence += 1
-        except (OSError, json.JSONDecodeError, KeyError) as exc:
-            return False, f"invalid audit log: {exc}"
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            return False, f"invalid audit log: {type(exc).__name__}: {exc}"
         if expected_sequence == 0:
             return False, "audit log is empty"
         return True, f"verified {expected_sequence} events; head={previous}"

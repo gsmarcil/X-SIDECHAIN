@@ -2,4 +2,4 @@
 
 # The one place the version is written. pyproject reads it from here, so a
 # release cannot disagree with the package it ships.
-__version__ = "0.5.0"
+__version__ = "0.5.1"
